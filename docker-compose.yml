@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: ktchat-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: ktchat
+      MYSQL_USER: ktchat
+      MYSQL_PASSWORD: password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - ktchat-network
+
+  # Go Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ktchat-backend
+    restart: unless-stopped
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=ktchat:password@tcp(mysql:3306)/ktchat?charset=utf8mb4&parseTime=True&loc=Local
+      - JWT_SECRET=dev-jwt-secret-key-change-in-production
+      - AWS_REGION=ap-northeast-1
+      - COGNITO_USER_POOL_ID=
+      - COGNITO_CLIENT_ID=
+      - COGNITO_CLIENT_SECRET=
+      - UPLOAD_PATH=./uploads
+      - MAX_FILE_SIZE=52428800
+      - ENCRYPTION_KEY=dev-encryption-key-32-bytes-long
+      - PORT=8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend/uploads:/root/uploads
+    depends_on:
+      - mysql
+    networks:
+      - ktchat-network
+
+  # Frontend (Nuxt.js) - Placeholder for future development
+  frontend:
+    image: node:18-alpine
+    container_name: ktchat-frontend
+    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "echo 'Frontend not yet implemented' && tail -f /dev/null"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+    networks:
+      - ktchat-network
+
+  # Laravel (for master/settings) - Placeholder for future development
+  laravel:
+    image: php:8.2-apache
+    container_name: ktchat-laravel
+    restart: unless-stopped
+    working_dir: /var/www/html
+    command: sh -c "echo 'Laravel not yet implemented' && tail -f /dev/null"
+    ports:
+      - "8000:80"
+    volumes:
+      - ./laravel:/var/www/html
+    networks:
+      - ktchat-network
+
+  # Nginx Reverse Proxy (for production-like setup)
+  nginx:
+    image: nginx:alpine
+    container_name: ktchat-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/conf.d:/etc/nginx/conf.d
+    depends_on:
+      - backend
+      - frontend
+      - laravel
+    networks:
+      - ktchat-network
+
+volumes:
+  mysql_data:
+
+networks:
+  ktchat-network:
+    driver: bridge 
