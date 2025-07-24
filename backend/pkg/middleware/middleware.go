@@ -1,9 +1,12 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
+
+	"ktchat/backend/internal/auth"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -31,8 +34,8 @@ func Logger() gin.HandlerFunc {
 	return gin.Logger()
 }
 
-// AuthMiddleware validates JWT tokens
-func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
+// AuthMiddleware validates JWT tokens (both custom and Cognito)
+func AuthMiddleware(jwtSecret string, cognitoAuth *auth.CognitoService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -51,37 +54,89 @@ func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
 		// Extract the token
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 
-		// Parse and validate the token
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			// Validate the signing method
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, jwt.ErrSignatureInvalid
-			}
-			return []byte(jwtSecret), nil
-		})
-
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
-			c.Abort()
-			return
-		}
-
-		if !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
-			c.Abort()
-			return
-		}
-
-		// Extract claims
-		if claims, ok := token.Claims.(jwt.MapClaims); ok {
+		// Try to validate as custom JWT token first
+		if userInfo, err := validateCustomToken(tokenString, jwtSecret); err == nil {
 			// Set user information in context
-			c.Set("user_id", claims["user_id"])
-			c.Set("username", claims["username"])
-			c.Set("email", claims["email"])
+			c.Set("user_id", userInfo.ID)
+			c.Set("username", userInfo.Username)
+			c.Set("email", userInfo.Email)
+			c.Next()
+			return
 		}
 
-		c.Next()
+		// If custom token validation fails, try Cognito token
+		if cognitoAuth != nil {
+			if userInfo, err := cognitoAuth.ValidateToken(c.Request.Context(), tokenString); err == nil {
+				// Set user information in context
+				c.Set("user_id", userInfo.ID)
+				c.Set("username", userInfo.Username)
+				c.Set("email", userInfo.Email)
+				c.Next()
+				return
+			}
+		}
+
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		c.Abort()
 	}
+}
+
+// validateCustomToken validates a custom JWT token
+func validateCustomToken(tokenString, jwtSecret string) (*auth.UserInfo, error) {
+	// Parse and validate the token
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Validate the signing method
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return []byte(jwtSecret), nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse token: %w", err)
+	}
+
+	if !token.Valid {
+		return nil, fmt.Errorf("invalid token")
+	}
+
+	// Extract claims
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, fmt.Errorf("invalid token claims")
+	}
+
+	// Validate issuer and audience
+	if iss, ok := claims["iss"].(string); !ok || iss != "ktchat-backend" {
+		return nil, fmt.Errorf("invalid token issuer")
+	}
+
+	if aud, ok := claims["aud"].(string); !ok || aud != "ktchat-frontend" {
+		return nil, fmt.Errorf("invalid token audience")
+	}
+
+	// Extract user information
+	userInfo := &auth.UserInfo{}
+
+	if userID, ok := claims["user_id"].(string); ok {
+		userInfo.ID = userID
+	} else {
+		return nil, fmt.Errorf("missing user_id in token")
+	}
+
+	if username, ok := claims["username"].(string); ok {
+		userInfo.Username = username
+	} else {
+		return nil, fmt.Errorf("missing username in token")
+	}
+
+	if email, ok := claims["email"].(string); ok {
+		userInfo.Email = email
+	} else {
+		return nil, fmt.Errorf("missing email in token")
+	}
+
+	return userInfo, nil
 }
 
 // RateLimit middleware for basic rate limiting

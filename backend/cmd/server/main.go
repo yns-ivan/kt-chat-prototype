@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 
+	"ktchat/backend/internal/auth"
 	"ktchat/backend/internal/chat"
 	"ktchat/backend/internal/database"
 	"ktchat/backend/internal/websocket"
@@ -29,12 +30,26 @@ func main() {
 		log.Fatal("Failed to connect to database:", err)
 	}
 
+	// Initialize Cognito service
+	var cognitoAuth *auth.CognitoService
+	if cfg.AWSCognito.UserPoolID != "" && cfg.AWSCognito.ClientID != "" {
+		cognitoAuth, err = auth.NewCognitoService(cfg)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize Cognito service: %v", err)
+			log.Println("Continuing with mock authentication...")
+		} else {
+			log.Println("Cognito service initialized successfully")
+		}
+	} else {
+		log.Println("Cognito configuration not found, using mock authentication")
+	}
+
 	// Initialize WebSocket hub
 	hub := websocket.NewHub()
 	go hub.Run()
 
 	// Initialize chat service
-	chatService := chat.NewService(db, hub)
+	chatService := chat.NewService(db, hub, cognitoAuth)
 
 	// Set Gin mode
 	if cfg.Environment == "production" {
@@ -54,6 +69,7 @@ func main() {
 			"status": "ok",
 			"service": "ktchat-backend",
 			"version": "1.0.0",
+			"cognito_enabled": cognitoAuth != nil,
 		})
 	})
 
@@ -66,11 +82,13 @@ func main() {
 			auth.POST("/login", chatService.Login)
 			auth.POST("/register", chatService.Register)
 			auth.POST("/refresh", chatService.RefreshToken)
+			auth.POST("/confirm", chatService.ConfirmUser)
+			auth.POST("/resend-confirmation", chatService.ResendConfirmationCode)
 		}
 
 		// Chat routes (protected)
 		chatRoutes := api.Group("/chat")
-		chatRoutes.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+		chatRoutes.Use(middleware.AuthMiddleware(cfg.JWTSecret, cognitoAuth))
 		{
 			chatRoutes.GET("/rooms", chatService.GetRooms)
 			chatRoutes.POST("/rooms", chatService.CreateRoom)
@@ -91,7 +109,8 @@ func main() {
 		port = "8080"
 	}
 
-	log.Printf("Starting server on port %s", port)
+	// Start server
+	log.Printf("Server starting on port %s", port)
 	if err := r.Run(":" + port); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}

@@ -5,6 +5,18 @@ interface User {
   avatar?: string
 }
 
+interface CognitoError {
+  code: string
+  message: string
+}
+
+interface AuthResult {
+  success: boolean
+  user?: User
+  error?: string
+  errorCode?: string
+}
+
 export const useAuth = () => {
   // User state
   const user = useState<User | null>('user', () => null)
@@ -16,7 +28,7 @@ export const useAuth = () => {
   const apiBaseUrl = config.public.apiBaseUrl
 
   // Login function
-  const login = async (username: string, password: string) => {
+  const login = async (username: string, password: string): Promise<AuthResult> => {
     try {
       const response = await $fetch<{ token: string; user: User }>('/api/v1/auth/login', {
         baseURL: apiBaseUrl,
@@ -41,18 +53,29 @@ export const useAuth = () => {
       }
     } catch (error: unknown) {
       console.error('Login error:', error)
-      const errorMessage = error && typeof error === 'object' && 'data' in error 
-        ? (error.data as any)?.message || 'Login failed'
-        : 'Login failed'
+      let errorMessage = 'Login failed'
+      let errorCode = 'UNKNOWN_ERROR'
+      
+      if (error && typeof error === 'object' && 'data' in error) {
+        const errorData = error.data as { error?: CognitoError }
+        if (errorData?.error) {
+          errorMessage = errorData.error.message
+          errorCode = errorData.error.code
+        }
+      }
+      
       return { 
         success: false, 
-        error: errorMessage
+        error: errorMessage,
+        errorCode: errorCode
       }
     }
+    
+    return { success: false, error: 'Login failed' }
   }
 
   // Register function
-  const register = async (username: string, email: string, password: string) => {
+  const register = async (username: string, email: string, password: string): Promise<AuthResult> => {
     try {
       const response = await $fetch<{ message: string; user: User }>('/api/v1/auth/register', {
         baseURL: apiBaseUrl,
@@ -69,12 +92,21 @@ export const useAuth = () => {
       return { success: true, user: response.user }
     } catch (error: unknown) {
       console.error('Registration error:', error)
-      const errorMessage = error && typeof error === 'object' && 'data' in error 
-        ? (error.data as any)?.message || 'Registration failed'
-        : 'Registration failed'
+      let errorMessage = 'Registration failed'
+      let errorCode = 'UNKNOWN_ERROR'
+      
+      if (error && typeof error === 'object' && 'data' in error) {
+        const errorData = error.data as { error?: CognitoError }
+        if (errorData?.error) {
+          errorMessage = errorData.error.message
+          errorCode = errorData.error.code
+        }
+      }
+      
       return { 
         success: false, 
-        error: errorMessage
+        error: errorMessage,
+        errorCode: errorCode
       }
     }
   }

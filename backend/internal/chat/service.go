@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"ktchat/backend/internal/auth"
 	"ktchat/backend/internal/encryption"
 	"ktchat/backend/internal/file"
 	"ktchat/backend/internal/models"
@@ -15,25 +16,26 @@ import (
 	"ktchat/backend/pkg/config"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 // Service handles chat-related operations
 type Service struct {
-	db  *gorm.DB
-	hub *websocket.Hub
-	cfg *config.Config
+	db           *gorm.DB
+	hub          *websocket.Hub
+	cfg          *config.Config
+	cognitoAuth  *auth.CognitoService
 }
 
 // NewService creates a new chat service
-func NewService(db *gorm.DB, hub *websocket.Hub) *Service {
+func NewService(db *gorm.DB, hub *websocket.Hub, cognitoAuth *auth.CognitoService) *Service {
 	cfg := config.New()
 	return &Service{
-		db:  db,
-		hub: hub,
-		cfg: cfg,
+		db:          db,
+		hub:         hub,
+		cfg:         cfg,
+		cognitoAuth: cognitoAuth,
 	}
 }
 
@@ -62,83 +64,157 @@ type MessageRequest struct {
 	Content string `json:"content" binding:"required"`
 }
 
-// Login handles user authentication
+// Login handles user authentication with AWS Cognito
 func (s *Service) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fmt.Printf("DEBUG: Login request binding error: %v\n", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+			"code":    "INVALID_REQUEST",
+			"message": err.Error(),
+		}})
 		return
 	}
 
-	// In a real implementation, you would validate against AWS Cognito
-	// For now, we'll use a simple mock authentication
-	if req.Username == "admin" && req.Password == "password" {
-		// Check if user exists, create if not
-		var user models.User
-		if err := s.db.Where("username = ?", req.Username).First(&user).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				// Create user if not exists
-				user = models.User{
-					ID:        "user-123",
-					Username:  req.Username,
-					Email:     "admin@example.com",
-					CognitoID: "mock-cognito-id",
-				}
-				if err := s.db.Create(&user).Error; err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user", "details": err.Error()})
+	// Debug: Log the received parameters
+	fmt.Printf("DEBUG: Login request received - Username: %s, Password length: %d\n", req.Username, len(req.Password))
+
+	// Authenticate with AWS Cognito
+	cognitoReq := auth.LoginRequest{
+		Username: req.Username,
+		Password: req.Password,
+	}
+
+	cognitoResp, userInfo, err := s.cognitoAuth.Login(c.Request.Context(), cognitoReq)
+	if err != nil {
+		// Debug: Log the full error
+		fmt.Printf("DEBUG: Cognito login error: %v\n", err)
+		// Extract structured error information from AWS Cognito
+		cognitoError := s.cognitoAuth.ExtractCognitoError(err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": cognitoError})
+		return
+	}
+
+	// Check if user exists in our database, create if not
+	var user models.User
+	if err := s.db.Where("cognito_id = ?", userInfo.ID).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Check if user exists by username (for existing users before Cognito integration)
+			if err := s.db.Where("username = ?", userInfo.Username).First(&user).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					// Create new user if not exists
+					user = models.User{
+						ID:        uuid.New().String(),
+						Username:  userInfo.Username,
+						Email:     userInfo.Email,
+						CognitoID: userInfo.ID,
+					}
+					if err := s.db.Create(&user).Error; err != nil {
+						c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{
+							"code":    "DATABASE_ERROR",
+							"message": "Failed to create user",
+						}})
+						return
+					}
+					fmt.Printf("Created new user: %+v\n", user)
+				} else {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{
+						"code":    "DATABASE_ERROR",
+						"message": "Database error",
+					}})
 					return
 				}
-				// Log successful user creation
-				fmt.Printf("Created user: %+v\n", user)
 			} else {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error", "details": err.Error()})
-				return
+				// Found existing user by username, update with Cognito ID
+				user.CognitoID = userInfo.ID
+				user.Email = userInfo.Email // Update email from Cognito
+				if err := s.db.Save(&user).Error; err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{
+						"code":    "DATABASE_ERROR",
+						"message": "Failed to update user",
+					}})
+					return
+				}
+				fmt.Printf("Updated existing user with Cognito ID: %+v\n", user)
 			}
 		} else {
-			// Log existing user found
-			fmt.Printf("Found existing user: %+v\n", user)
-		}
-
-		// Generate JWT token
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"user_id":  user.ID,
-			"username": user.Username,
-			"email":    user.Email,
-			"exp":      time.Now().Add(time.Hour * 24).Unix(),
-		})
-
-		tokenString, err := token.SignedString([]byte(s.cfg.JWTSecret))
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{
+				"code":    "DATABASE_ERROR",
+				"message": "Database error",
+			}})
 			return
 		}
+	} else {
+		// Update user info if needed
+		if user.Username != userInfo.Username || user.Email != userInfo.Email {
+			user.Username = userInfo.Username
+			user.Email = userInfo.Email
+			if err := s.db.Save(&user).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{
+					"code":    "DATABASE_ERROR",
+					"message": "Failed to update user",
+				}})
+				return
+			}
+		}
+		fmt.Printf("Found existing user by Cognito ID: %+v\n", user)
+	}
 
-		c.JSON(http.StatusOK, gin.H{
-			"token": tokenString,
-			"user": gin.H{
-				"id":       user.ID,
-				"username": user.Username,
-				"email":    user.Email,
-			},
-		})
+	// Generate custom JWT token for internal use
+	customToken, err := s.cognitoAuth.GenerateCustomToken(userInfo)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{
+			"code":    "TOKEN_ERROR",
+			"message": "Failed to generate token",
+		}})
 		return
 	}
 
-	c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+	c.JSON(http.StatusOK, gin.H{
+		"token": customToken,
+		"cognito_tokens": gin.H{
+			"access_token":  cognitoResp.AccessToken,
+			"refresh_token": cognitoResp.RefreshToken,
+			"id_token":      cognitoResp.IDToken,
+			"expires_in":    cognitoResp.ExpiresIn,
+			"token_type":    cognitoResp.TokenType,
+		},
+		"user": gin.H{
+			"id":       user.ID,
+			"username": user.Username,
+			"email":    user.Email,
+		},
+	})
 }
 
-// Register handles user registration
+// Register handles user registration with AWS Cognito
 func (s *Service) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+			"code":    "INVALID_REQUEST",
+			"message": err.Error(),
+		}})
 		return
 	}
 
-	// In a real implementation, you would register with AWS Cognito
-	// For now, we'll just return success
+	// Register with AWS Cognito
+	cognitoReq := auth.RegisterRequest{
+		Username: req.Username,
+		Email:    req.Email,
+		Password: req.Password,
+	}
+
+	err := s.cognitoAuth.Register(c.Request.Context(), cognitoReq)
+	if err != nil {
+		// Extract structured error information from AWS Cognito
+		cognitoError := s.cognitoAuth.ExtractCognitoError(err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": cognitoError})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"message": "User registered successfully",
+		"message": "User registered successfully. Please check your email for confirmation.",
 		"user": gin.H{
 			"username": req.Username,
 			"email":    req.Email,
@@ -146,10 +222,62 @@ func (s *Service) Register(c *gin.Context) {
 	})
 }
 
-// RefreshToken handles token refresh
+// RefreshToken handles token refresh with AWS Cognito
 func (s *Service) RefreshToken(c *gin.Context) {
-	// Implementation for token refresh
-	c.JSON(http.StatusOK, gin.H{"message": "Token refreshed"})
+	var req struct {
+		RefreshToken string `json:"refresh_token" binding:"required"`
+	}
+	
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+			"code":    "INVALID_REQUEST",
+			"message": err.Error(),
+		}})
+		return
+	}
+
+	// Refresh token with AWS Cognito
+	cognitoReq := auth.RefreshTokenRequest{
+		RefreshToken: req.RefreshToken,
+	}
+
+	cognitoResp, err := s.cognitoAuth.RefreshToken(c.Request.Context(), cognitoReq)
+	if err != nil {
+		// Extract structured error information from AWS Cognito
+		cognitoError := s.cognitoAuth.ExtractCognitoError(err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": cognitoError})
+		return
+	}
+
+	// Extract user info from the new ID token
+	userInfo, err := s.cognitoAuth.ValidateToken(c.Request.Context(), cognitoResp.IDToken)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{
+			"code":    "TOKEN_VALIDATION_ERROR",
+			"message": "Failed to validate token",
+		}})
+		return
+	}
+
+	// Generate new custom JWT token
+	customToken, err := s.cognitoAuth.GenerateCustomToken(userInfo)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{
+			"code":    "TOKEN_GENERATION_ERROR",
+			"message": "Failed to generate token",
+		}})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"token": customToken,
+		"cognito_tokens": gin.H{
+			"access_token": cognitoResp.AccessToken,
+			"id_token":     cognitoResp.IDToken,
+			"expires_in":   cognitoResp.ExpiresIn,
+			"token_type":   cognitoResp.TokenType,
+		},
+	})
 }
 
 // GetRooms returns all available chat rooms
@@ -383,4 +511,53 @@ func (s *Service) UploadFile(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"file": attachment})
+} 
+
+// ConfirmUser handles user account confirmation
+func (s *Service) ConfirmUser(c *gin.Context) {
+	var req struct {
+		Username         string `json:"username" binding:"required"`
+		ConfirmationCode string `json:"confirmation_code" binding:"required"`
+	}
+	
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+			"code":    "INVALID_REQUEST",
+			"message": err.Error(),
+		}})
+		return
+	}
+
+	err := s.cognitoAuth.ConfirmUser(c.Request.Context(), req.Username, req.ConfirmationCode)
+	if err != nil {
+		cognitoError := s.cognitoAuth.ExtractCognitoError(err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": cognitoError})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "User confirmed successfully"})
+}
+
+// ResendConfirmationCode handles resending confirmation codes
+func (s *Service) ResendConfirmationCode(c *gin.Context) {
+	var req struct {
+		Username string `json:"username" binding:"required"`
+	}
+	
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+			"code":    "INVALID_REQUEST",
+			"message": err.Error(),
+		}})
+		return
+	}
+
+	err := s.cognitoAuth.ResendConfirmationCode(c.Request.Context(), req.Username)
+	if err != nil {
+		cognitoError := s.cognitoAuth.ExtractCognitoError(err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": cognitoError})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Confirmation code sent successfully"})
 } 

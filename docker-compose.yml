@@ -31,9 +31,11 @@ services:
       - DATABASE_URL=ktchat:password@tcp(mysql:3306)/ktchat?charset=utf8mb4&parseTime=True&loc=Local
       - JWT_SECRET=dev-jwt-secret-key-change-in-production
       - AWS_REGION=ap-northeast-1
-      - COGNITO_USER_POOL_ID=
-      - COGNITO_CLIENT_ID=
-      - COGNITO_CLIENT_SECRET=
+      - COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID:-}
+      - COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID:-}
+      - COGNITO_CLIENT_SECRET=${COGNITO_CLIENT_SECRET:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       - UPLOAD_PATH=./uploads
       - MAX_FILE_SIZE=52428800
       - ENCRYPTION_KEY=dev-encryption-key-32-bytes-long
@@ -75,16 +77,17 @@ services:
     networks:
       - ktchat-network
 
-  # Nginx Reverse Proxy (for production-like setup)
+  # Nginx Reverse Proxy
   nginx:
     image: nginx:alpine
     container_name: ktchat-nginx
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
     depends_on:
       - backend
       - frontend

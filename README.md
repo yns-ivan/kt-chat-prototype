@@ -30,7 +30,7 @@ chat-prototype/
 - **Real-time Chat**: WebSocket-based messaging with room support
 - **File Upload**: Images, PDFs, and videos with preview capabilities
 - **Message Encryption**: AES-256-GCM encryption for secure messaging
-- **User Authentication**: AWS Cognito integration
+- **User Authentication**: AWS Cognito integration with JWT tokens
 - **Searchable Messages**: Encrypted message search functionality
 
 ### Technical Features
@@ -39,6 +39,7 @@ chat-prototype/
 - **WebSocket Hub**: Efficient real-time communication
 - **File Management**: Upload, validation, and thumbnail generation
 - **Docker Support**: Complete containerized development environment
+- **AWS Integration**: Cognito User Pool for authentication
 
 ## 🛠️ Technology Stack
 
@@ -47,8 +48,9 @@ chat-prototype/
 - **Framework**: Gin (HTTP framework)
 - **Database**: MySQL 8.0 with GORM
 - **WebSocket**: Gorilla WebSocket
-- **Authentication**: AWS Cognito + JWT
+- **Authentication**: AWS Cognito + Custom JWT
 - **Encryption**: AES-256-GCM
+- **AWS SDK**: AWS SDK v2 for Go
 
 ### Infrastructure
 - **Containerization**: Docker & Docker Compose
@@ -82,17 +84,32 @@ chat-prototype/
    cd chat-prototype
    ```
 
-2. **Start the development environment**
+2. **Configure AWS Cognito (Optional)**
+   ```bash
+   # Follow the setup guide for AWS Cognito
+   # docs/AWS_COGNITO_SETUP.md
+   
+   # Or use mock authentication for development
+   # (No configuration needed)
+   ```
+
+3. **Start the development environment**
    ```bash
    docker compose up -d    # Newer Docker CLI plugin (recommended)
    # OR
    docker-compose up -d    # Legacy standalone tool
    ```
 
-3. **Access the application**
+4. **Access the application**
    - Backend API: http://localhost:8080
    - Health Check: http://localhost:8080/health
    - Nginx Proxy: http://localhost:80
+
+5. **Test the setup**
+   ```bash
+   # Run the test script
+   ./scripts/test-cognito.sh
+   ```
 
 ### Local Development
 
@@ -127,11 +144,15 @@ DATABASE_URL=ktchat:password@tcp(localhost:3306)/ktchat?charset=utf8mb4&parseTim
 # JWT
 JWT_SECRET=your-secret-key-change-in-production
 
-# AWS Cognito
+# AWS Cognito (Optional - for production)
 AWS_REGION=ap-northeast-1
 COGNITO_USER_POOL_ID=your-user-pool-id
 COGNITO_CLIENT_ID=your-client-id
 COGNITO_CLIENT_SECRET=your-client-secret
+
+# AWS Credentials (for local development)
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
 
 # File Upload
 UPLOAD_PATH=./uploads
@@ -144,12 +165,29 @@ ENCRYPTION_KEY=your-encryption-key-32-bytes-long
 PORT=8080
 ```
 
+### AWS Cognito Setup
+
+For production authentication, follow the comprehensive setup guide:
+
+📖 **[AWS Cognito Setup Guide](docs/AWS_COGNITO_SETUP.md)**
+
+The guide includes:
+- Step-by-step User Pool creation
+- App client configuration
+- Environment variable setup
+- Testing procedures
+- Troubleshooting tips
+
 ## 📚 API Documentation
 
+### Base URL
+- **Local**: http://localhost:8080
+- **Docker**: http://localhost:80 (via Nginx)
+
 ### Authentication Endpoints
-- `POST /api/v1/auth/login` - User login
-- `POST /api/v1/auth/register` - User registration
-- `POST /api/v1/auth/refresh` - Token refresh
+- `POST /api/v1/auth/login` - User login (Cognito or mock)
+- `POST /api/v1/auth/register` - User registration (Cognito)
+- `POST /api/v1/auth/refresh` - Token refresh (Cognito)
 
 ### Chat Endpoints
 - `GET /api/v1/chat/rooms` - Get all chat rooms
@@ -159,83 +197,56 @@ PORT=8080
 - `POST /api/v1/chat/rooms/:roomID/leave` - Leave a chat room
 
 ### WebSocket
-- `GET /api/v1/ws` - Real-time chat connection
+- `GET /api/v1/ws` - WebSocket connection for real-time chat
 
-## 🔐 Security Features
+### Health Check
+- `GET /health` - Health check endpoint with Cognito status
 
-### Message Encryption
-- All chat messages are encrypted using AES-256-GCM
-- Encryption keys are configurable via environment variables
-- Searchable encryption implementation for message search
+## 🔐 Authentication Flow
 
-### Authentication
-- JWT-based authentication
-- AWS Cognito integration for user management
-- Rate limiting on API endpoints
+### With AWS Cognito (Production)
+1. User registers via `/api/v1/auth/register`
+2. User confirms email (Cognito sends confirmation email)
+3. User logs in via `/api/v1/auth/login`
+4. Backend validates with Cognito and returns custom JWT
+5. Frontend uses custom JWT for API calls
 
-### File Security
-- File type validation
-- File size limits
-- Secure file storage with unique naming
-
-## 📊 Performance Considerations
-
-### Load Testing
-- Target: 500 concurrent users
-- JMeter test scripts included
-- Performance monitoring and optimization
-
-### Scalability
-- Database connection pooling
-- WebSocket connection management
-- Efficient message broadcasting
-- File upload optimization
-
-## 🚀 Deployment
-
-### EC2 Deployment
-The application is configured for deployment on:
-- **Instance**: DEV-KTCHAT-WEB01 (54.179.141.95)
-- **Document Root**: `/var/www/dev-ktchat/public`
-- **Go Path**: `/usr/local/go/bin/go`
-- **Port**: 8080 (Go app), 80 (Nginx)
-- **Basic Auth**: ktchat / s9RnNyai
-
-### Production Setup
-1. Set `ENVIRONMENT=production`
-2. Configure production database
-3. Set secure encryption keys
-4. Configure AWS Cognito credentials
-5. Set up SSL certificates
-6. Configure monitoring and logging
+### Without AWS Cognito (Development)
+1. Application falls back to mock authentication
+2. Use username: `admin`, password: `password`
+3. Backend generates custom JWT tokens
+4. Same API flow as production
 
 ## 🧪 Testing
 
-### Load Testing with JMeter
+### Test Scripts
 ```bash
-# Run JMeter tests
-jmeter -n -t tests/load-test.jmx -l results.jtl
+# Test Cognito integration
+./scripts/test-cognito.sh
+
+# Test basic functionality
+./scripts/test-setup.sh
 ```
 
-### API Testing
+### Manual Testing
 ```bash
-# Test health endpoint
+# Health check
 curl http://localhost:8080/health
 
-# Test authentication
+# Login (mock auth)
 curl -X POST http://localhost:8080/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"password"}'
 ```
 
-## 📁 Project Structure
+## 🏗️ Project Structure
 
 ```
 chat-prototype/
 ├── backend/                    # Go backend application
 │   ├── cmd/server/            # Application entry point
 │   ├── internal/              # Internal packages
-│   │   ├── auth/              # Authentication logic
+│   │   ├── auth/              # AWS Cognito authentication
 │   │   ├── chat/              # Chat service
 │   │   ├── database/          # Database operations
 │   │   ├── encryption/        # Message encryption
@@ -247,6 +258,7 @@ chat-prototype/
 │   │   ├── middleware/        # HTTP middleware
 │   │   └── utils/             # Utilities
 │   ├── Dockerfile             # Backend container
+│   ├── Makefile               # Development commands
 │   ├── go.mod                 # Go dependencies
 │   └── README.md              # Backend documentation
 ├── frontend/                  # Nuxt.js frontend (planned)
@@ -255,48 +267,103 @@ chat-prototype/
 │   ├── nginx.conf             # Main nginx config
 │   └── conf.d/                # Server configurations
 ├── scripts/                   # Utility scripts
-│   └── init.sql               # Database initialization
+│   ├── init.sql               # Database initialization
+│   ├── test-setup.sh          # Environment test script
+│   └── test-cognito.sh        # Cognito integration test
 ├── docs/                      # Documentation
+│   ├── AWS_COGNITO_SETUP.md   # Cognito setup guide
+│   ├── DOCKER_COMPOSE_GUIDE.md # Docker setup guide
+│   └── SETUP_GUIDE.md         # General setup guide
 ├── docker-compose.yml         # Development environment
-└── README.md                  # This file
+└── README.md                  # Main project documentation
 ```
+
+## 🛠️ Development Commands
+
+### Using Makefile (Backend)
+```bash
+cd backend
+
+# Build the application
+make build
+
+# Run the application
+make run
+
+# Run tests
+make test
+
+# Format code
+make fmt
+
+# Install dependencies
+make deps
+
+# View all commands
+make help
+```
+
+### Using Docker Compose
+```bash
+# Start all services
+docker compose up -d
+
+# Stop all services
+docker compose down
+
+# View logs
+docker compose logs -f
+
+# Rebuild and restart
+docker compose up -d --build
+```
+
+## 🔒 Security Features
+
+- **Message Encryption**: AES-256-GCM encryption for all messages
+- **JWT Tokens**: Secure token-based authentication
+- **AWS Cognito**: Enterprise-grade user management
+- **File Validation**: Type and size validation for uploads
+- **Rate Limiting**: Basic rate limiting on API endpoints
+- **CORS Protection**: Configured CORS headers
+
+## 🚀 Deployment
+
+### Production Checklist
+- [ ] Configure AWS Cognito User Pool
+- [ ] Set up IAM roles (no access keys)
+- [ ] Enable HTTPS
+- [ ] Configure proper CORS origins
+- [ ] Set up monitoring and logging
+- [ ] Enable MFA for user accounts
+- [ ] Configure custom domain for Cognito
+
+### EC2 Deployment
+The application is designed to be deployed on the existing EC2 instance (DEV-KTCHAT-WEB01) with Nginx as a reverse proxy.
+
+## 📖 Documentation
+
+- **[AWS Cognito Setup](docs/AWS_COGNITO_SETUP.md)** - Complete Cognito configuration guide
+- **[Docker Setup](docs/DOCKER_COMPOSE_GUIDE.md)** - Docker environment setup
+- **[General Setup](docs/SETUP_GUIDE.md)** - Basic setup instructions
+- **[Backend README](backend/README.md)** - Backend-specific documentation
 
 ## 🤝 Contributing
 
-1. Follow Go coding standards
-2. Add tests for new features
-3. Update documentation
-4. Use conventional commit messages
-5. Ensure all tests pass before submitting
-
-## 📝 Development Notes
-
-### Go Development Environment
-- Latest Go version (1.24.5)
-- Standard Go project layout
-- Comprehensive error handling
-- Proper logging and monitoring
-
-### Database Design
-- Normalized schema for scalability
-- Proper indexing for performance
-- Foreign key relationships
-- Audit trails (created_at, updated_at)
-
-### Security Considerations
-- Input validation and sanitization
-- SQL injection prevention
-- XSS protection
-- CSRF protection
-- Rate limiting
-
-## 📞 Support
-
-For questions and support:
-- Check the documentation in each component directory
-- Review the API documentation
-- Check the deployment guide for production setup
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
 
 ## 📄 License
 
-This project is for learning and technical verification purposes. 
+This project is for learning and technical verification purposes.
+
+## 🆘 Support
+
+For issues and questions:
+1. Check the documentation in the `docs/` folder
+2. Review the troubleshooting sections
+3. Check the test scripts for examples
+4. Verify your AWS Cognito configuration 
