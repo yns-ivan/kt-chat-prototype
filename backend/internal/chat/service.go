@@ -2,6 +2,8 @@ package chat
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -71,11 +73,37 @@ func (s *Service) Login(c *gin.Context) {
 	// In a real implementation, you would validate against AWS Cognito
 	// For now, we'll use a simple mock authentication
 	if req.Username == "admin" && req.Password == "password" {
+		// Check if user exists, create if not
+		var user models.User
+		if err := s.db.Where("username = ?", req.Username).First(&user).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				// Create user if not exists
+				user = models.User{
+					ID:        "user-123",
+					Username:  req.Username,
+					Email:     "admin@example.com",
+					CognitoID: "mock-cognito-id",
+				}
+				if err := s.db.Create(&user).Error; err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user", "details": err.Error()})
+					return
+				}
+				// Log successful user creation
+				fmt.Printf("Created user: %+v\n", user)
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error", "details": err.Error()})
+				return
+			}
+		} else {
+			// Log existing user found
+			fmt.Printf("Found existing user: %+v\n", user)
+		}
+
 		// Generate JWT token
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"user_id":  "user-123",
-			"username": req.Username,
-			"email":    "admin@example.com",
+			"user_id":  user.ID,
+			"username": user.Username,
+			"email":    user.Email,
 			"exp":      time.Now().Add(time.Hour * 24).Unix(),
 		})
 
@@ -88,9 +116,9 @@ func (s *Service) Login(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"token": tokenString,
 			"user": gin.H{
-				"id":       "user-123",
-				"username": req.Username,
-				"email":    "admin@example.com",
+				"id":       user.ID,
+				"username": user.Username,
+				"email":    user.Email,
 			},
 		})
 		return
@@ -158,7 +186,7 @@ func (s *Service) CreateRoom(c *gin.Context) {
 	}
 
 	if err := s.db.Create(&room).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create room"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create room", "details": err.Error()})
 		return
 	}
 
