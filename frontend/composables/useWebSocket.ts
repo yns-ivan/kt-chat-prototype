@@ -36,7 +36,9 @@ export const useWebSocket = () => {
     reconnectAttempts.value = 0
     currentRoomId.value = roomId
 
-    const wsUrl = config.public.apiBaseUrl.replace('http', 'ws')
+    // Construct WebSocket URL properly
+    const baseUrl = config.public.apiBaseUrl.replace(/\/$/, '') // Remove trailing slash if present
+    const wsUrl = baseUrl.replace(/^http/, 'ws')
     const url = `${wsUrl}/api/v1/ws?user_id=${user.value.id}&username=${user.value.username}&room_id=${roomId}`
     
     socket.value = new WebSocket(url)
