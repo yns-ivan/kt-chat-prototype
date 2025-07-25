@@ -5,23 +5,27 @@ phases:
     runtime-versions:
       nodejs: 22
     commands:
+      - cd frontend
       - npm install
-      
+
   pre_build:
     commands:
+      - cd frontend
       - echo "API_BASE_URL=$API_BASE_URL" >> .env
       - echo "WS_URL=$WS_URL" >> .env
       - echo "NODE_ENV=production" >> .env
-      
+
   build:
     commands:
+      - cd frontend
       - npm run build
       
   post_build:
     commands:
+      - cd frontend
       - aws s3 sync .output/public/ s3://$S3_BUCKET_NAME/ --delete
 
 artifacts:
   files:
-    - .output/**/*
-  base-directory: .output
+    - frontend/.output/**/*
+  base-directory: frontend/.output
