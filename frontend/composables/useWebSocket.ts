@@ -14,12 +14,29 @@ export const useWebSocket = () => {
   const messages = ref<ChatMessage[]>([])
   const config = useRuntimeConfig()
   const { user } = useAuth()
+  
+  // Reconnection logic
+  const reconnectAttempts = ref(0)
+  const maxReconnectAttempts = 5
+  const reconnectDelay = 1000 // 1 second
+  const currentRoomId = ref<string | null>(null)
+  const reconnectTimeout = ref<NodeJS.Timeout | null>(null)
 
   // Connect to WebSocket
   const connect = (roomId: string) => {
     if (!user.value) return
 
-    const wsUrl = config.public.wsUrl.replace('http', 'ws')
+    // Clear any existing reconnection timeout
+    if (reconnectTimeout.value) {
+      clearTimeout(reconnectTimeout.value)
+      reconnectTimeout.value = null
+    }
+
+    // Reset reconnection attempts for new room
+    reconnectAttempts.value = 0
+    currentRoomId.value = roomId
+
+    const wsUrl = config.public.apiBaseUrl.replace('http', 'ws')
     const url = `${wsUrl}/api/v1/ws?user_id=${user.value.id}&username=${user.value.username}&room_id=${roomId}`
     
     socket.value = new WebSocket(url)
@@ -27,6 +44,7 @@ export const useWebSocket = () => {
     socket.value.onopen = () => {
       console.log('WebSocket connected')
       isConnected.value = true
+      reconnectAttempts.value = 0 // Reset attempts on successful connection
     }
 
     socket.value.onmessage = (event) => {
@@ -38,9 +56,14 @@ export const useWebSocket = () => {
       }
     }
 
-    socket.value.onclose = () => {
-      console.log('WebSocket disconnected')
+    socket.value.onclose = (event) => {
+      console.log('WebSocket disconnected', event.code, event.reason)
       isConnected.value = false
+      
+      // Attempt to reconnect if not a manual disconnect
+      if (event.code !== 1000 && currentRoomId.value && reconnectAttempts.value < maxReconnectAttempts) {
+        attemptReconnect()
+      }
     }
 
     socket.value.onerror = (error) => {
@@ -49,10 +72,34 @@ export const useWebSocket = () => {
     }
   }
 
+  // Attempt to reconnect
+  const attemptReconnect = () => {
+    if (!currentRoomId.value || reconnectAttempts.value >= maxReconnectAttempts) return
+
+    reconnectAttempts.value++
+    console.log(`Attempting to reconnect (${reconnectAttempts.value}/${maxReconnectAttempts})...`)
+
+    reconnectTimeout.value = setTimeout(() => {
+      if (currentRoomId.value) {
+        connect(currentRoomId.value)
+      }
+    }, reconnectDelay * reconnectAttempts.value) // Exponential backoff
+  }
+
   // Disconnect from WebSocket
   const disconnect = () => {
+    // Clear any pending reconnection attempts
+    if (reconnectTimeout.value) {
+      clearTimeout(reconnectTimeout.value)
+      reconnectTimeout.value = null
+    }
+    
+    // Reset reconnection state
+    reconnectAttempts.value = 0
+    currentRoomId.value = null
+    
     if (socket.value) {
-      socket.value.close()
+      socket.value.close(1000, 'Manual disconnect') // Use code 1000 for normal closure
       socket.value = null
       isConnected.value = false
     }
@@ -86,6 +133,11 @@ export const useWebSocket = () => {
     connect,
     disconnect,
     sendMessage,
-    clearMessages
+    clearMessages,
+    reconnect: () => {
+      if (currentRoomId.value) {
+        connect(currentRoomId.value)
+      }
+    }
   }
 } 

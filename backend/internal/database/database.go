@@ -6,7 +6,7 @@ import (
 
 	"ktchat/backend/internal/models"
 
-	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -21,7 +21,7 @@ func Init(databaseURL string) (*gorm.DB, error) {
 	gormLogger := logger.Default.LogMode(logger.Info)
 
 	// Connect to database
-	DB, err = gorm.Open(mysql.Open(databaseURL), &gorm.Config{
+	DB, err = gorm.Open(postgres.Open(databaseURL), &gorm.Config{
 		Logger: gormLogger,
 	})
 	if err != nil {

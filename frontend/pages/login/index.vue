@@ -1,5 +1,5 @@
 <template>
-  <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 48px 16px;">
+  <div v-if="!isInitializing" style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 48px 16px;">
     <div style="max-width: 448px; width: 100%; display: flex; flex-direction: column; gap: 32px;">
       <div style="text-align: center;">
         <div style="width: 80px; height: 80px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 24px;">
@@ -8,10 +8,10 @@
         <h2 style="font-size: 32px; font-weight: bold; background: linear-gradient(135deg, #3b82f6, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
           Welcome to KT Chat
         </h2>
-        <p style="margin-top: 8px; color: #6b7280;">
+        <p style="margin-top: 8px; color: #ffffff;">
           Sign in to your account or
           <button
-            @click="showRegister = true"
+            @click="() => { showRegister = true; clearRegisterErrors(); }"
             style="font-weight: 600; color: #3b82f6; background: none; border: none; cursor: pointer; transition: color 0.2s;"
           >
             create a new account
@@ -73,15 +73,15 @@
     </div>
 
     <!-- Register Modal -->
-    <div v-if="showRegister" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 50;">
-      <div style="background: white; border-radius: 16px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); max-width: 448px; width: 100%; margin: 0 16px;">
+    <div v-if="showRegister" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 50;" @click="() => { showRegister = false; clearRegisterErrors(); }">
+      <div style="background: white; border-radius: 16px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); max-width: 400px; width: 90%; margin: 0 16px;" @click.stop>
         <div style="padding: 24px; border-bottom: 1px solid #e5e7eb;">
           <h3 style="font-size: 18px; font-weight: 600; color: #111827;">Create Account</h3>
         </div>
 
-        <form @submit.prevent="handleRegister" style="padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+        <form @submit.prevent="handleRegister" style="padding: 32px 24px; display: flex; flex-direction: column; gap: 20px;">
           <div>
-            <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 8px;">
+            <label style="display: block; font-size: 14px; font-weight: 600; color: #111827; margin-bottom: 10px;">
               Username *
             </label>
             <input
@@ -89,12 +89,14 @@
               type="text"
               placeholder="Choose a username"
               required
-              style="width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px; background: white; color: #111827; font-size: 14px;"
+              style="width: 100%; padding: 12px 16px; border: 1px solid #d1d5db; border-radius: 8px; background: white; color: #111827; font-size: 14px; transition: all 0.2s; box-sizing: border-box;"
+              @focus="$event.target.style.borderColor = '#3b82f6'"
+              @blur="$event.target.style.borderColor = '#d1d5db'"
             />
           </div>
           
           <div>
-            <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 8px;">
+            <label style="display: block; font-size: 14px; font-weight: 600; color: #111827; margin-bottom: 10px;">
               Email *
             </label>
             <input
@@ -102,12 +104,14 @@
               type="email"
               placeholder="Enter your email"
               required
-              style="width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px; background: white; color: #111827; font-size: 14px;"
+              style="width: 100%; padding: 12px 16px; border: 1px solid #d1d5db; border-radius: 8px; background: white; color: #111827; font-size: 14px; transition: all 0.2s; box-sizing: border-box;"
+              @focus="$event.target.style.borderColor = '#3b82f6'"
+              @blur="$event.target.style.borderColor = '#d1d5db'"
             />
           </div>
           
           <div>
-            <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 8px;">
+            <label style="display: block; font-size: 14px; font-weight: 600; color: #111827; margin-bottom: 10px;">
               Password *
             </label>
             <input
@@ -115,22 +119,40 @@
               type="password"
               placeholder="Choose a password"
               required
-              style="width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px; background: white; color: #111827; font-size: 14px;"
+              style="width: 100%; padding: 12px 16px; border: 1px solid #d1d5db; border-radius: 8px; background: white; color: #111827; font-size: 14px; transition: all 0.2s; box-sizing: border-box;"
+              @focus="$event.target.style.borderColor = '#3b82f6'"
+              @blur="$event.target.style.borderColor = '#d1d5db'"
             />
+          </div>
+
+          <div v-if="registerError" style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin-top: 8px;">
+            <p style="color: #dc2626; font-size: 14px; text-align: center; font-weight: 500; margin: 0;">
+              {{ registerError }}
+            </p>
+          </div>
+
+          <div v-if="registerSuccess" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin-top: 8px;">
+            <p style="color: #16a34a; font-size: 14px; text-align: center; font-weight: 500; margin: 0;">
+              {{ registerSuccess }}
+            </p>
           </div>
         </form>
 
-        <div style="padding: 24px; border-top: 1px solid #e5e7eb; display: flex; justify-content: flex-end; gap: 8px;">
+        <div style="padding: 24px; border-top: 1px solid #e5e7eb; display: flex; justify-content: flex-end; gap: 12px;">
           <button
-            @click="showRegister = false"
-            style="padding: 8px 16px; color: #374151; background: transparent; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; transition: background-color 0.2s;"
+            @click="() => { showRegister = false; clearRegisterErrors(); }"
+            style="padding: 10px 20px; color: #6b7280; background: transparent; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
+            @mouseenter="$event.target.style.backgroundColor = '#f9fafb'"
+            @mouseleave="$event.target.style.backgroundColor = 'transparent'"
           >
             Cancel
           </button>
           <button
             @click="handleRegister"
             :disabled="registerLoading"
-            style="padding: 8px 16px; background: #3b82f6; color: white; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; transition: background-color 0.2s;"
+            style="padding: 10px 20px; background: #3b82f6; color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.2);"
+            @mouseenter="$event.target.style.backgroundColor = '#2563eb'"
+            @mouseleave="$event.target.style.backgroundColor = '#3b82f6'"
           >
             {{ registerLoading ? 'Creating...' : 'Create Account' }}
           </button>
@@ -211,8 +233,13 @@ defineOptions({
   name: 'LoginPage'
 })
 
+// Apply authentication middleware
+definePageMeta({
+  middleware: 'auth'
+})
+
 // Auth composable
-const { login, register } = useAuth()
+const { login, register, isInitializing } = useAuth()
 
 // Form data
 const form = ref({
@@ -239,11 +266,19 @@ const showRegister = ref(false)
 const showConfirmation = ref(false)
 const error = ref('')
 const success = ref('')
+const registerError = ref('')
+const registerSuccess = ref('')
 const confirmationError = ref('')
 const confirmationSuccess = ref('')
 
 // Store username for confirmation
 const pendingConfirmationUsername = ref('')
+
+// Clear register errors when modal is opened/closed
+const clearRegisterErrors = () => {
+  registerError.value = ''
+  registerSuccess.value = ''
+}
 
 // Handle login
 const handleLogin = async () => {
@@ -282,12 +317,13 @@ const handleLogin = async () => {
 // Handle register
 const handleRegister = async () => {
   if (!registerForm.value.username || !registerForm.value.email || !registerForm.value.password) {
-    error.value = 'Please fill in all fields'
+    registerError.value = 'Please fill in all fields'
     return
   }
 
   registerLoading.value = true
-  error.value = ''
+  registerError.value = ''
+  registerSuccess.value = ''
 
   try {
     const result = await register(
@@ -296,23 +332,33 @@ const handleRegister = async () => {
       registerForm.value.password
     )
     
+    console.log('Register result:', result) // Debug log
+    
     if (result.success) {
-      showRegister.value = false
-      // Auto-fill login form
-      form.value.username = registerForm.value.username
-      form.value.password = registerForm.value.password
+      // Show success message in register modal
+      registerSuccess.value = 'Registration successful! Please check your email for confirmation code.'
       
       // Clear register form
       registerForm.value = { username: '', email: '', password: '' }
       
-      // Show success message and prompt to login
-      success.value = 'Registration successful! Please check your email for confirmation code and login.'
-      error.value = ''
+      // Auto-fill login form
+      form.value.username = registerForm.value.username
+      form.value.password = registerForm.value.password
+      
+      // Close register modal after 2 seconds
+      setTimeout(() => {
+        showRegister.value = false
+        registerSuccess.value = ''
+        // Show success message in main form
+        success.value = 'Registration successful! Please check your email for confirmation code and login.'
+      }, 2000)
     } else {
-      error.value = result.error || 'Registration failed'
+      console.log('Register error:', result.error, result.errorCode) // Debug log
+      registerError.value = result.error || 'Registration failed'
     }
-  } catch {
-    error.value = 'Registration failed. Please try again.'
+  } catch (error) {
+    console.log('Register exception:', error) // Debug log
+    registerError.value = 'Registration failed. Please try again.'
   } finally {
     registerLoading.value = false
   }

@@ -1,218 +1,441 @@
-# Docker Compose Command Guide
+# Docker Compose Guide
 
-This guide explains the differences between `docker-compose` and `docker compose` commands and how to use them in the KT Chat project.
+This guide explains how to use Docker Compose to run the KT Chat prototype in a containerized environment.
 
-## 🔄 Two Different Commands
+## 🐳 Overview
 
-### `docker compose` (New - Recommended)
-- **Type**: Docker CLI plugin
-- **Availability**: Since Docker 20.10.13
-- **Installation**: Comes with Docker Desktop and Docker CLI
-- **Status**: **Latest and recommended**
-- **Performance**: Better performance and integration
-- **Features**: More features and better Docker ecosystem integration
+The KT Chat prototype uses Docker Compose to orchestrate multiple services:
 
-### `docker-compose` (Legacy)
-- **Type**: Standalone binary
-- **Availability**: Traditional installation
-- **Installation**: Needs to be installed separately
-- **Status**: Still supported but being phased out
-- **Performance**: Older, less optimized
-- **Features**: Basic functionality
+- **PostgreSQL 15**: Database for storing chat data and user information
+- **Go Backend**: REST API and WebSocket server
+- **Nginx**: Reverse proxy for production-like setup
+- **Frontend**: Nuxt.js SPA (planned)
+- **Laravel**: Admin panel (planned)
 
-## 🧪 How to Check Which One You Have
+## 🚀 Quick Start
 
-### Check for `docker compose` (new)
+### Prerequisites
+- Docker Desktop installed
+- Docker Compose plugin enabled
+
+### 1. Clone and Navigate
 ```bash
-docker compose --version
+git clone <repository-url>
+cd chat-prototype
 ```
 
-### Check for `docker-compose` (legacy)
+### 2. Configure Environment
 ```bash
-docker-compose --version
+# Copy environment file
+cp .env.example .env
+
+# Edit with your configuration
+nano .env
 ```
 
-### Check both
+### 3. Start Services
 ```bash
-# Check new version
-if command -v docker compose &> /dev/null; then
-    echo "✅ docker compose (new) is available"
-fi
-
-# Check legacy version
-if command -v docker-compose &> /dev/null; then
-    echo "✅ docker-compose (legacy) is available"
-fi
-```
-
-## 🚀 Using Docker Compose in KT Chat
-
-### Automatic Detection
-The project includes scripts that automatically detect and use the correct command:
-
-```bash
-# Use the wrapper script (recommended)
-./scripts/docker-compose-wrapper.sh up -d
-
-# Or use the test script to see which command is detected
-./scripts/test-setup.sh
-```
-
-### Manual Usage
-
-#### If you have `docker compose` (new):
-```bash
-# Start services
+# Start all services
 docker compose up -d
 
-# Stop services
+# Check status
+docker compose ps
+```
+
+### 4. Verify Setup
+```bash
+# Test backend
+curl http://localhost:8080/health
+
+# Test database
+docker compose exec postgres psql -U ktchat -d ktchat -c "\dt"
+```
+
+## 📋 Service Configuration
+
+### PostgreSQL Database
+```yaml
+postgres:
+  image: postgres:15-alpine
+  container_name: ktchat-postgres
+  environment:
+    POSTGRES_DB: ktchat
+    POSTGRES_USER: ktchat
+    POSTGRES_PASSWORD: password
+    POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+  ports:
+    - "5432:5432"
+  volumes:
+    - postgres_data:/var/lib/postgresql/data
+    - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql
+```
+
+**Key Features:**
+- Uses PostgreSQL 15 Alpine for smaller image size
+- UTF-8 encoding for international character support
+- Persistent data storage with named volume
+- Automatic initialization script execution
+
+### Go Backend
+```yaml
+backend:
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  environment:
+    - DATABASE_URL=postgres://ktchat:password@postgres:5432/ktchat?sslmode=disable
+    - JWT_SECRET=dev-jwt-secret-key-change-in-production
+    - AWS_REGION=ap-northeast-1
+    - COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID:-}
+    - COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID:-}
+    - COGNITO_CLIENT_SECRET=${COGNITO_CLIENT_SECRET:-}
+    - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+    - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+  ports:
+    - "8080:8080"
+  volumes:
+    - ./backend/uploads:/root/uploads
+  depends_on:
+    - postgres
+```
+
+**Key Features:**
+- Multi-stage build for optimized image size
+- Environment variable configuration
+- File upload volume mounting
+- Service dependency management
+
+### Nginx Reverse Proxy
+```yaml
+nginx:
+  image: nginx:alpine
+  container_name: ktchat-nginx
+  ports:
+    - "80:80"
+    - "443:443"
+  volumes:
+    - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    - ./nginx/conf.d:/etc/nginx/conf.d:ro
+  depends_on:
+    - backend
+    - frontend
+    - laravel
+```
+
+**Key Features:**
+- Lightweight Alpine-based image
+- Configuration file mounting
+- SSL support ready
+- Load balancing capabilities
+
+## 🔧 Environment Variables
+
+### Required Variables
+```env
+# Database
+DATABASE_URL=postgres://ktchat:password@postgres:5432/ktchat?sslmode=disable
+
+# JWT
+JWT_SECRET=dev-jwt-secret-key-change-in-production
+
+# AWS Cognito (Optional)
+AWS_REGION=ap-northeast-1
+COGNITO_USER_POOL_ID=your-user-pool-id
+COGNITO_CLIENT_ID=your-client-id
+COGNITO_CLIENT_SECRET=your-client-secret
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+```
+
+### Optional Variables
+```env
+# File Upload
+UPLOAD_PATH=./uploads
+MAX_FILE_SIZE=52428800
+
+# Encryption
+ENCRYPTION_KEY=dev-encryption-key-32-bytes-long
+
+# Server
+PORT=8080
+ENVIRONMENT=development
+```
+
+## 🛠️ Docker Commands
+
+### Basic Operations
+```bash
+# Start all services
+docker compose up -d
+
+# Stop all services
 docker compose down
 
 # View logs
 docker compose logs -f
 
-# Build and start
+# Rebuild and restart
 docker compose up -d --build
+
+# Check service status
+docker compose ps
 ```
 
-#### If you have `docker-compose` (legacy):
+### Service-Specific Commands
 ```bash
-# Start services
-docker-compose up -d
+# View backend logs
+docker compose logs backend
 
-# Stop services
-docker-compose down
+# View database logs
+docker compose logs postgres
 
-# View logs
-docker-compose logs -f
+# Execute commands in containers
+docker compose exec backend sh
+docker compose exec postgres psql -U ktchat -d ktchat
 
-# Build and start
-docker-compose up -d --build
+# Restart specific service
+docker compose restart backend
 ```
 
-## 🛠️ Using Makefile Commands
-
-The Makefile automatically uses the correct command:
-
+### Database Operations
 ```bash
-cd backend
+# Connect to PostgreSQL
+docker compose exec postgres psql -U ktchat -d ktchat
 
-# Start services
-make docker-run
+# Backup database
+docker compose exec postgres pg_dump -U ktchat ktchat > backup.sql
 
-# Stop services
-make docker-stop
+# Restore database
+docker compose exec -T postgres psql -U ktchat -d ktchat < backup.sql
 
-# View logs
-make logs
-```
-
-## 📋 Command Comparison
-
-| Feature | `docker compose` | `docker-compose` |
-|---------|------------------|------------------|
-| **Installation** | Comes with Docker CLI | Separate installation |
-| **Performance** | Better | Slower |
-| **Integration** | Native Docker CLI | External tool |
-| **Updates** | With Docker updates | Manual updates |
-| **Future** | Actively developed | Maintenance mode |
-| **Compatibility** | Backward compatible | Legacy |
-
-## 🔧 Migration Guide
-
-### From `docker-compose` to `docker compose`
-
-1. **Update Docker**: Ensure you have Docker 20.10.13 or later
-2. **Test the new command**: `docker compose --version`
-3. **Update scripts**: Replace `docker-compose` with `docker compose`
-4. **Update documentation**: Update any references
-
-### Example Migration
-
-**Before:**
-```bash
-docker-compose up -d
-docker-compose logs -f
-docker-compose down
-```
-
-**After:**
-```bash
+# Reset database (WARNING: Deletes all data)
+docker compose down -v
 docker compose up -d
+```
+
+## 📊 Monitoring and Debugging
+
+### Health Checks
+```bash
+# Backend health
+curl http://localhost:8080/health
+
+# Database connection
+docker compose exec postgres pg_isready -U ktchat
+
+# Service status
+docker compose ps
+```
+
+### Log Analysis
+```bash
+# Follow all logs
 docker compose logs -f
-docker compose down
+
+# Follow specific service
+docker compose logs -f backend
+
+# Search logs
+docker compose logs | grep "ERROR"
+
+# Export logs
+docker compose logs > logs.txt
 ```
 
-## 🎯 Best Practices
-
-### 1. Use the Wrapper Script
+### Resource Usage
 ```bash
-# Instead of guessing which command to use
-./scripts/docker-compose-wrapper.sh up -d
+# Container resource usage
+docker stats
+
+# Disk usage
+docker system df
+
+# Clean up unused resources
+docker system prune
 ```
 
-### 2. Use Makefile Commands
-```bash
-# The Makefile handles the command detection
-make docker-run
-make docker-stop
-make logs
-```
+## 🔒 Security Considerations
 
-### 3. Check Your Environment
-```bash
-# Run the test script to verify your setup
-./scripts/test-setup.sh
-```
+### Development Environment
+- Default passwords are used for development
+- SSL is disabled for local development
+- All services are exposed on localhost
 
-### 4. Update Your Scripts
-If you have custom scripts, update them to use the wrapper:
+### Production Recommendations
+```yaml
+# Production docker-compose.yml example
+version: '3.8'
+services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}  # Use secrets
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal  # Internal network only
+  
+  backend:
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+    networks:
+      - internal
+      - external
+  
+  nginx:
+    networks:
+      - external
+    volumes:
+      - ./ssl:/etc/nginx/ssl:ro  # SSL certificates
 
-```bash
-#!/bin/bash
-# Instead of hardcoding docker-compose
-# Use the wrapper script
-./scripts/docker-compose-wrapper.sh "$@"
+networks:
+  internal:
+    internal: true
+  external:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
 ```
 
 ## 🐛 Troubleshooting
 
-### Command Not Found
+### Common Issues
+
+**1. Port Conflicts**
 ```bash
-# Check if Docker is installed
-docker --version
+# Check what's using the ports
+lsof -i :8080
+lsof -i :5432
+lsof -i :80
 
-# Check if docker compose is available
-docker compose --version
-
-# Check if docker-compose is available
-docker-compose --version
+# Change ports in docker-compose.yml if needed
+ports:
+  - "8081:8080"  # Use different host port
 ```
 
-### Permission Issues
+**2. Database Connection Issues**
 ```bash
-# Make sure the wrapper script is executable
-chmod +x scripts/docker-compose-wrapper.sh
+# Check if PostgreSQL is running
+docker compose ps postgres
+
+# Check database logs
+docker compose logs postgres
+
+# Test connection manually
+docker compose exec postgres psql -U ktchat -d ktchat -c "SELECT 1;"
 ```
 
-### Version Conflicts
-If you have both commands installed:
-1. The wrapper script will prefer `docker compose` (newer)
-2. You can manually specify which one to use
-3. Consider uninstalling the legacy version to avoid confusion
+**3. Backend Won't Start**
+```bash
+# Check backend logs
+docker compose logs backend
+
+# Check environment variables
+docker compose exec backend env | grep DATABASE
+
+# Verify database URL format
+# Should be: postgres://ktchat:password@postgres:5432/ktchat?sslmode=disable
+```
+
+**4. Permission Issues**
+```bash
+# Fix file permissions
+sudo chown -R $USER:$USER .
+
+# Fix Docker volume permissions
+docker compose down
+sudo chown -R 1001:1001 ./backend/uploads
+docker compose up -d
+```
+
+### Reset Everything
+```bash
+# Stop and remove everything
+docker compose down -v
+
+# Remove all images
+docker rmi $(docker images -q)
+
+# Clean up volumes
+docker volume prune
+
+# Rebuild from scratch
+docker compose up -d --build
+```
+
+## 📈 Performance Optimization
+
+### Resource Limits
+```yaml
+services:
+  postgres:
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+  
+  backend:
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+```
+
+### Database Optimization
+```yaml
+postgres:
+  environment:
+    POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    POSTGRES_SHARED_BUFFERS: 256MB
+    POSTGRES_EFFECTIVE_CACHE_SIZE: 1GB
+    POSTGRES_WORK_MEM: 4MB
+    POSTGRES_MAINTENANCE_WORK_MEM: 64MB
+```
+
+### Caching
+```yaml
+nginx:
+  volumes:
+    - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    - nginx_cache:/var/cache/nginx  # Add caching volume
+
+volumes:
+  nginx_cache:
+```
+
+## 🔄 CI/CD Integration
+
+### GitHub Actions Example
+```yaml
+name: Deploy to Production
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Deploy to server
+        run: |
+          ssh user@server "cd /path/to/app && git pull && docker compose up -d --build"
+```
 
 ## 📚 Additional Resources
 
 - [Docker Compose Documentation](https://docs.docker.com/compose/)
-- [Docker CLI Plugin Documentation](https://docs.docker.com/engine/reference/commandline/compose/)
-- [Migration Guide](https://docs.docker.com/compose/migrate/)
+- [PostgreSQL Docker Image](https://hub.docker.com/_/postgres)
+- [Nginx Docker Image](https://hub.docker.com/_/nginx)
+- [Docker Best Practices](https://docs.docker.com/develop/dev-best-practices/)
 
-## 🎉 Summary
+---
 
-- **Use `docker compose`** (new) when possible - it's the future
-- **Use the wrapper script** for automatic detection
-- **Use Makefile commands** for convenience
-- **Both commands work** - the project supports both
-- **Test your setup** with `./scripts/test-setup.sh`
-
-The KT Chat project is designed to work with both commands, so you can use whichever one is available on your system! 
+**Note**: This guide covers development setup. For production deployment, additional security measures, monitoring, and backup strategies should be implemented. 

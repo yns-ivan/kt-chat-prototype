@@ -402,10 +402,17 @@ func (s *Service) LeaveRoom(c *gin.Context) {
 // SendMessage sends a message to a chat room
 func (s *Service) SendMessage(c *gin.Context) {
 	roomID := c.Param("roomID")
-	userID := c.GetString("user_id")
+	cognitoUserID := c.GetString("user_id")
 
-	if roomID == "" || userID == "" {
+	if roomID == "" || cognitoUserID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Room ID and user ID are required"})
+		return
+	}
+
+	// Look up the internal user ID using the Cognito ID
+	var user models.User
+	if err := s.db.Where("cognito_id = ?", cognitoUserID).First(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User not found"})
 		return
 	}
 
@@ -425,7 +432,7 @@ func (s *Service) SendMessage(c *gin.Context) {
 	message := models.Message{
 		ID:        uuid.New().String(),
 		RoomID:    roomID,
-		UserID:    userID,
+		UserID:    user.ID, // Use the internal user ID
 		Content:   encryptedContent,
 		Encrypted: true,
 	}
@@ -439,7 +446,7 @@ func (s *Service) SendMessage(c *gin.Context) {
 	wsMessage := websocket.Message{
 		Type:      "message",
 		RoomID:    roomID,
-		UserID:    userID,
+		UserID:    user.ID, // Use the internal user ID
 		Content:   req.Content, // Send decrypted content to WebSocket
 		Timestamp: time.Now().Format(time.RFC3339),
 	}

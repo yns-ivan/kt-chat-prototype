@@ -1,106 +1,133 @@
 # KT Chat Backend
 
-A Go-based backend for the KT Chat prototype system with real-time messaging, file uploads, and encryption.
+A Go-based backend for the KT Chat prototype featuring real-time messaging, file uploads, encryption, and AWS Cognito integration.
 
-## Features
+## 🚀 Features
 
-- **Real-time Chat**: WebSocket-based real-time messaging
-- **File Upload**: Support for images, PDFs, and videos with preview
-- **Message Encryption**: AES-256-GCM encryption for chat messages
-- **AWS Cognito Integration**: User authentication via AWS Cognito
-- **MySQL Database**: Persistent storage with GORM
-- **RESTful API**: Clean API design with Gin framework
+- **Real-time Chat**: WebSocket-based messaging with room support
+- **File Upload**: Images, PDFs, and videos with preview capabilities
+- **Message Encryption**: AES-256-GCM encryption for secure messaging
+- **User Authentication**: AWS Cognito integration with JWT tokens
+- **Searchable Messages**: Encrypted message search functionality
 
-## Prerequisites
+## 🛠️ Technology Stack
+
+- **Language**: Go 1.24.5
+- **Framework**: Gin (HTTP framework)
+- **Database**: PostgreSQL 15 with GORM
+- **WebSocket**: Gorilla WebSocket
+- **Authentication**: AWS Cognito + Custom JWT
+- **Encryption**: AES-256-GCM
+- **AWS SDK**: AWS SDK v2 for Go
+
+## 📋 Requirements
 
 - Go 1.24.5 or later
-- MySQL 8.0 or later
-- AWS Cognito User Pool (for production)
+- PostgreSQL 15 or later
+- Docker & Docker Compose (for containerized development)
 
-## Project Structure
-
-```
-backend/
-├── cmd/
-│   └── server/
-│       └── main.go          # Application entry point
-├── internal/
-│   ├── auth/               # Authentication logic
-│   ├── chat/               # Chat service and handlers
-│   ├── database/           # Database initialization and migrations
-│   ├── encryption/         # Message encryption/decryption
-│   ├── file/               # File upload and management
-│   ├── models/             # Database models
-│   └── websocket/          # WebSocket hub and client management
-├── pkg/
-│   ├── config/             # Configuration management
-│   ├── middleware/         # HTTP middleware
-│   └── utils/              # Utility functions
-├── go.mod                  # Go module file
-├── go.sum                  # Go dependencies checksum
-├── env.example             # Environment variables example
-└── README.md               # This file
-```
-
-## Setup
-
-1. **Clone the repository and navigate to backend directory**
-   ```bash
-   cd backend
-   ```
-
-2. **Install dependencies**
-   ```bash
-   go mod tidy
-   ```
-
-3. **Set up environment variables**
-   ```bash
-   cp env.example .env
-   # Edit .env with your configuration
-   ```
-
-4. **Set up MySQL database**
-   ```sql
-   CREATE DATABASE ktchat CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-   CREATE USER 'ktchat'@'localhost' IDENTIFIED BY 'password';
-   GRANT ALL PRIVILEGES ON ktchat.* TO 'ktchat'@'localhost';
-   FLUSH PRIVILEGES;
-   ```
-
-5. **Run the application**
-   ```bash
-   go run cmd/server/main.go
-   ```
-
-## Configuration
+## 🔧 Configuration
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `ENVIRONMENT` | Application environment | `development` |
-| `DATABASE_URL` | MySQL connection string | `ktchat:password@tcp(localhost:3306)/ktchat?charset=utf8mb4&parseTime=True&loc=Local` |
-| `JWT_SECRET` | JWT signing secret | `your-secret-key-change-in-production` |
-| `AWS_REGION` | AWS region for Cognito | `ap-northeast-1` |
-| `COGNITO_USER_POOL_ID` | AWS Cognito User Pool ID | - |
-| `COGNITO_CLIENT_ID` | AWS Cognito Client ID | - |
-| `COGNITO_CLIENT_SECRET` | AWS Cognito Client Secret | - |
-| `UPLOAD_PATH` | File upload directory | `./uploads` |
-| `MAX_FILE_SIZE` | Maximum file size in bytes | `52428800` (50MB) |
-| `ENCRYPTION_KEY` | Encryption key (32 bytes) | `your-encryption-key-32-bytes-long` |
-| `PORT` | Server port | `8080` |
+Create a `.env` file in the backend directory:
 
-## API Endpoints
+```env
+# Environment
+ENVIRONMENT=development
 
-### Authentication
+# Database (PostgreSQL)
+DATABASE_URL=postgres://ktchat:password@localhost:5432/ktchat?sslmode=disable
 
-- `POST /api/v1/auth/login` - User login
-- `POST /api/v1/auth/register` - User registration
-- `POST /api/v1/auth/refresh` - Token refresh
+# JWT
+JWT_SECRET=your-secret-key-change-in-production
 
-### Chat Rooms
+# AWS Cognito (Optional)
+AWS_REGION=ap-northeast-1
+COGNITO_USER_POOL_ID=your-user-pool-id
+COGNITO_CLIENT_ID=your-client-id
+COGNITO_CLIENT_SECRET=your-client-secret
 
+# AWS Credentials
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+
+# File Upload
+UPLOAD_PATH=./uploads
+MAX_FILE_SIZE=52428800
+
+# Encryption
+ENCRYPTION_KEY=your-encryption-key-32-bytes-long
+
+# Server
+PORT=8080
+```
+
+### Database Setup
+
+1. **Install PostgreSQL 15+**
+   ```bash
+   # macOS
+   brew install postgresql@15
+   
+   # Ubuntu/Debian
+   sudo apt-get install postgresql-15
+   ```
+
+2. **Set up the database**
+   ```bash
+   # Create database and user
+   sudo -u postgres psql
+   CREATE DATABASE ktchat;
+   CREATE USER ktchat WITH PASSWORD 'password';
+   GRANT ALL PRIVILEGES ON DATABASE ktchat TO ktchat;
+   GRANT ALL PRIVILEGES ON SCHEMA public TO ktchat;
+   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO ktchat;
+   \q
+   ```
+
+## 🚀 Quick Start
+
+### Using Docker (Recommended)
+
+```bash
+# Start all services
+docker compose up -d
+
+# Check status
+docker compose ps
+
+# View logs
+docker compose logs backend
+```
+
+### Local Development
+
+```bash
+# Install dependencies
+go mod download
+
+# Run the application
+go run cmd/server/main.go
+
+# Or use air for hot reload
+air
+```
+
+## 📚 API Documentation
+
+### Base URL
+- **Local**: http://localhost:8080
+- **Docker**: http://localhost:80 (via Nginx)
+
+### Authentication Endpoints
+- `POST /api/v1/auth/login` - User login (Cognito or mock)
+- `POST /api/v1/auth/register` - User registration (Cognito)
+- `POST /api/v1/auth/refresh` - Token refresh (Cognito)
+- `POST /api/v1/auth/confirm` - Confirm user account
+- `POST /api/v1/auth/resend-confirmation` - Resend confirmation code
+
+### Chat Endpoints
 - `GET /api/v1/chat/rooms` - Get all chat rooms
 - `POST /api/v1/chat/rooms` - Create a new chat room
 - `GET /api/v1/chat/rooms/:roomID/messages` - Get messages for a room
@@ -108,116 +135,143 @@ backend/
 - `POST /api/v1/chat/rooms/:roomID/leave` - Leave a chat room
 
 ### WebSocket
-
 - `GET /api/v1/ws` - WebSocket connection for real-time chat
 
 ### Health Check
+- `GET /health` - Health check endpoint with Cognito status
 
-- `GET /health` - Health check endpoint
+## 🧪 Testing
 
-## WebSocket Protocol
-
-### Connection
-Connect to `/api/v1/ws?user_id=<user_id>&username=<username>&room_id=<room_id>`
-
-### Message Format
-```json
-{
-  "type": "message",
-  "room_id": "room-123",
-  "user_id": "user-123",
-  "username": "john_doe",
-  "content": "Hello, world!",
-  "timestamp": "2024-01-01T12:00:00Z",
-  "files": [
-    {
-      "id": "file-123",
-      "file_name": "image.jpg",
-      "file_type": "image",
-      "file_size": 1024
-    }
-  ]
-}
-```
-
-## Encryption
-
-Messages are encrypted using AES-256-GCM before being stored in the database. The encryption key is configurable via the `ENCRYPTION_KEY` environment variable.
-
-### Searchable Encryption
-
-For message search functionality, a simplified searchable encryption scheme is implemented. In production, consider using more sophisticated approaches like:
-
-- Encrypted Bloom filters
-- Searchable symmetric encryption (SSE)
-- Homomorphic encryption
-
-## File Upload
-
-Supported file types:
-- **Images**: JPG, JPEG, PNG, GIF, BMP, WebP
-- **Documents**: PDF
-- **Videos**: MP4, AVI, MOV, WMV, FLV, WebM
-- **Audio**: MP3, WAV, OGG, AAC
-
-Files are stored in the configured upload directory with unique filenames.
-
-## Development
-
-### Running Tests
+### Test Scripts
 ```bash
-go test ./...
+# Test basic functionality
+./scripts/test-setup.sh
+
+# Test AWS Cognito integration
+./scripts/test-cognito.sh
+
+# Test user confirmation flow
+./scripts/test-confirmation.sh
 ```
 
-### Building for Production
+### Manual Testing
 ```bash
-go build -o bin/server cmd/server/main.go
+# Health check
+curl http://localhost:8080/health
+
+# Login (mock auth)
+curl -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"password"}'
 ```
 
-### Docker Support
+## 🏗️ Project Structure
+
+```
+backend/
+├── cmd/server/            # Application entry point
+├── internal/              # Internal packages
+│   ├── auth/              # AWS Cognito authentication
+│   ├── chat/              # Chat service
+│   ├── database/          # Database operations
+│   ├── encryption/        # Message encryption
+│   ├── file/              # File handling
+│   ├── models/            # Database models
+│   └── websocket/         # WebSocket management
+├── pkg/                   # Public packages
+│   ├── config/            # Configuration
+│   ├── middleware/        # HTTP middleware
+│   └── utils/             # Utilities
+├── Dockerfile             # Backend container
+├── Makefile               # Development commands
+├── go.mod                 # Go dependencies
+└── README.md              # Backend documentation
+```
+
+## 🛠️ Development Commands
+
+### Using Makefile
 ```bash
-docker build -t ktchat-backend .
-docker run -p 8080:8080 ktchat-backend
+# Build the application
+make build
+
+# Run the application
+make run
+
+# Run tests
+make test
+
+# Format code
+make fmt
+
+# Install dependencies
+make deps
+
+# View all commands
+make help
 ```
 
-## Deployment
+### Using Docker Compose
+```bash
+# Start all services
+docker compose up -d
+
+# Stop all services
+docker compose down
+
+# View logs
+docker compose logs -f
+
+# Rebuild and restart
+docker compose up -d --build
+```
+
+## 🔒 Security Features
+
+- **Message Encryption**: AES-256-GCM encryption for all messages
+- **JWT Tokens**: Secure token-based authentication
+- **AWS Cognito**: Enterprise-grade user management
+- **File Validation**: Type and size validation for uploads
+- **Rate Limiting**: Basic rate limiting on API endpoints
+- **CORS Protection**: Configured CORS headers
+
+## 🚀 Deployment
+
+### Production Checklist
+- [ ] Configure AWS Cognito User Pool
+- [ ] Set up IAM roles (no access keys)
+- [ ] Enable HTTPS
+- [ ] Configure proper CORS origins
+- [ ] Set up monitoring and logging
+- [ ] Enable MFA for user accounts
+- [ ] Configure custom domain for Cognito
 
 ### EC2 Deployment
-The application is configured to run on EC2 instance `DEV-KTCHAT-WEB01` (54.179.141.95) with:
-- Nginx reverse proxy on port 80
-- Go application on port 8080
-- Basic auth: `ktchat` / `s9RnNyai`
+The application is designed to be deployed on the existing EC2 instance (DEV-KTCHAT-WEB01) with Nginx as a reverse proxy.
 
-### Environment Setup
-1. Set `ENVIRONMENT=production`
-2. Configure production database URL
-3. Set secure JWT and encryption keys
-4. Configure AWS Cognito credentials
+## 📖 Documentation
 
-## Performance Considerations
+- **[AWS Cognito Setup](../docs/AWS_COGNITO_SETUP.md)** - Complete Cognito configuration guide
+- **[Docker Setup](../docs/DOCKER_COMPOSE_GUIDE.md)** - Docker environment setup
+- **[General Setup](../docs/SETUP_GUIDE.md)** - Basic setup instructions
 
-- Database connection pooling is configured
-- Rate limiting middleware is implemented
-- WebSocket connections are managed efficiently
-- File uploads are validated and size-limited
+## 📞 Support
 
-## Security
+For questions and support:
+- Check the documentation in each component directory
+- Review the API documentation
+- Check the deployment guide for production setup
+- Run the test script to verify your environment
 
-- JWT-based authentication
-- Message encryption at rest
-- CORS configuration
-- Input validation and sanitization
-- File type validation
+## 🎉 Next Steps
 
-## Monitoring
+After setting up the development environment:
 
-- Health check endpoint available
-- Request logging middleware
-- Error handling and logging
+1. **Explore the API**: Test the endpoints using curl or Postman
+2. **Set up AWS Cognito**: Configure user authentication
+3. **Implement Frontend**: Build the Nuxt.js SPA
+4. **Add Laravel Admin**: Implement master/settings functionality
+5. **Load Testing**: Use JMeter to test performance
+6. **Deploy to EC2**: Set up production environment
 
-## Contributing
-
-1. Follow Go coding standards
-2. Add tests for new features
-3. Update documentation
-4. Use conventional commit messages 
+Happy coding! 🚀 

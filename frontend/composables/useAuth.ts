@@ -1,5 +1,5 @@
 interface User {
-  id: number
+  id: string
   username: string
   email: string
   avatar?: string
@@ -21,6 +21,66 @@ export const useAuth = () => {
   // User state
   const user = useState<User | null>('user', () => null)
   const token = useState<string | null>('token', () => null)
+  const isInitializing = useState<boolean>('auth_initializing', () => true)
+  
+  // Initialize auth state from localStorage
+  const initializeAuth = () => {
+    if (import.meta.client) {
+      console.log('Initializing auth state from localStorage...')
+      isInitializing.value = true
+      
+      try {
+        const storedToken = localStorage.getItem('ktchat_token')
+        const storedUser = localStorage.getItem('ktchat_user')
+        
+        console.log('Stored token exists:', !!storedToken)
+        console.log('Stored user exists:', !!storedUser)
+        
+        if (storedToken && storedUser) {
+          // Basic token validation - check if it's a valid JWT format
+          try {
+            const parts = storedToken.split('.')
+            if (parts.length === 3 && parts[1]) {
+              // Decode the payload to check expiration
+              const payload = JSON.parse(atob(parts[1]))
+              const now = Math.floor(Date.now() / 1000)
+              
+              console.log('Token expiration:', payload.exp)
+              console.log('Current time:', now)
+              
+              // If token is expired, remove it
+              if (payload.exp && payload.exp < now) {
+                console.log('Token expired, removing from localStorage')
+                localStorage.removeItem('ktchat_token')
+                localStorage.removeItem('ktchat_user')
+                isInitializing.value = false
+                return
+              }
+              
+              // Set the state
+              console.log('Setting auth state from localStorage')
+              token.value = storedToken
+              user.value = JSON.parse(storedUser)
+            }
+          } catch (error) {
+            console.log('Token validation failed:', error)
+            // If token is malformed, remove it
+            localStorage.removeItem('ktchat_token')
+            localStorage.removeItem('ktchat_user')
+          }
+        }
+      } catch (error) {
+        console.error('Error initializing auth:', error)
+      }
+      
+      // Mark initialization as complete
+      isInitializing.value = false
+    } else {
+      console.log('Not on client side, skipping auth initialization')
+      isInitializing.value = false
+    }
+  }
+  
   const isAuthenticated = computed(() => !!token.value)
 
   // API base URL
@@ -113,6 +173,9 @@ export const useAuth = () => {
 
   // Logout function
   const logout = () => {
+    console.log('Logging out user...')
+    
+    // Clear state
     token.value = null
     user.value = null
     
@@ -120,20 +183,15 @@ export const useAuth = () => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('ktchat_token')
       localStorage.removeItem('ktchat_user')
+      console.log('Cleared localStorage')
     }
+    
+    console.log('Logout completed')
   }
 
   // Initialize auth state from localStorage
   const initAuth = () => {
-    if (typeof window !== 'undefined') {
-      const storedToken = localStorage.getItem('ktchat_token')
-      const storedUser = localStorage.getItem('ktchat_user')
-      
-      if (storedToken && storedUser) {
-        token.value = storedToken
-        user.value = JSON.parse(storedUser)
-      }
-    }
+    initializeAuth()
   }
 
   // Refresh token
@@ -168,15 +226,38 @@ export const useAuth = () => {
     return token.value ? { 'Authorization': `Bearer ${token.value}` } : {}
   }
 
+  // Debug function to check auth state
+  const debugAuthState = () => {
+    if (import.meta.client) {
+      console.log('Auth State Debug:')
+      console.log('- Token in state:', !!token.value)
+      console.log('- User in state:', !!user.value)
+      console.log('- Token in localStorage:', !!localStorage.getItem('ktchat_token'))
+      console.log('- User in localStorage:', !!localStorage.getItem('ktchat_user'))
+      console.log('- isAuthenticated:', isAuthenticated.value)
+      console.log('- Client side:', import.meta.client)
+      console.log('- Token value:', token.value ? token.value.substring(0, 20) + '...' : 'null')
+    }
+  }
+
+  // Initialize auth state immediately when composable is created
+  if (import.meta.client) {
+    // Initialize immediately
+    initializeAuth()
+  }
+
   return {
     user: readonly(user),
     token: readonly(token),
     isAuthenticated,
+    isInitializing: readonly(isInitializing),
     login,
     register,
     logout,
     initAuth,
     refreshToken,
-    getAuthHeaders
+    getAuthHeaders,
+    debugAuthState,
+    initializeAuth
   }
 } 

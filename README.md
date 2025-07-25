@@ -35,7 +35,7 @@ chat-prototype/
 
 ### Technical Features
 - **Go Backend**: Latest Go 1.24.5 with Gin framework
-- **MySQL Database**: Persistent storage with GORM
+- **PostgreSQL Database**: High-performance database optimized for chat systems
 - **WebSocket Hub**: Efficient real-time communication
 - **File Management**: Upload, validation, and thumbnail generation
 - **Docker Support**: Complete containerized development environment
@@ -46,7 +46,7 @@ chat-prototype/
 ### Backend
 - **Language**: Go 1.24.5
 - **Framework**: Gin (HTTP framework)
-- **Database**: MySQL 8.0 with GORM
+- **Database**: PostgreSQL 15 with GORM
 - **WebSocket**: Gorilla WebSocket
 - **Authentication**: AWS Cognito + Custom JWT
 - **Encryption**: AES-256-GCM
@@ -55,7 +55,7 @@ chat-prototype/
 ### Infrastructure
 - **Containerization**: Docker & Docker Compose
 - **Reverse Proxy**: Nginx
-- **Database**: MySQL 8.0
+- **Database**: PostgreSQL 15 (optimized for chat systems)
 - **Deployment**: EC2 with Nginx reverse proxy
 
 ### Planned Components
@@ -67,7 +67,7 @@ chat-prototype/
 ### System Requirements
 - Docker & Docker Compose
 - Go 1.24.5+ (for local development)
-- MySQL 8.0+ (for local development)
+- PostgreSQL 15+ (for local development)
 - Node.js 18+ (for frontend development)
 
 ### AWS Services
@@ -100,260 +100,179 @@ chat-prototype/
    docker-compose up -d    # Legacy standalone tool
    ```
 
-4. **Access the application**
-   - Backend API: http://localhost:8080
-   - Health Check: http://localhost:8080/health
-   - Nginx Proxy: http://localhost:80
-
-5. **Test the setup**
+4. **Verify the services**
    ```bash
-   # Run the test script
-   ./scripts/test-cognito.sh
+   # Check if all services are running
+   docker compose ps
+   
+   # Check backend health
+   curl http://localhost:8080/health
+   
+   # Check PostgreSQL connection
+   docker compose exec postgres psql -U ktchat -d ktchat -c "\dt"
    ```
 
-### Local Development
+### Manual Setup (Alternative)
 
-1. **Set up the backend**
+1. **Install PostgreSQL 15+**
+   ```bash
+   # macOS
+   brew install postgresql@15
+   
+   # Ubuntu/Debian
+   sudo apt-get install postgresql-15
+   
+   # Windows
+   # Download from https://www.postgresql.org/download/windows/
+   ```
+
+2. **Set up the database**
+   ```bash
+   # Create database and user
+   sudo -u postgres psql
+   CREATE DATABASE ktchat;
+   CREATE USER ktchat WITH PASSWORD 'password';
+   GRANT ALL PRIVILEGES ON DATABASE ktchat TO ktchat;
+   \q
+   ```
+
+3. **Configure environment variables**
+   ```bash
+   # Create .env file in the root directory
+   cp .env.example .env
+   
+   # Update the DATABASE_URL for PostgreSQL
+   DATABASE_URL=postgres://ktchat:password@localhost:5432/ktchat?sslmode=disable
+   ```
+
+4. **Run the backend**
    ```bash
    cd backend
-   cp env.example .env
-   # Edit .env with your configuration
-   go mod tidy
+   go mod download
    go run cmd/server/main.go
    ```
 
-2. **Set up MySQL**
-   ```bash
-   # Run the database initialization script
-   mysql -u root -p < scripts/init.sql
-   ```
-
-## 🔧 Configuration
-
-### Environment Variables
-
-Create a `.env` file in the backend directory:
-
-```env
-# Environment
-ENVIRONMENT=development
-
-# Database
-DATABASE_URL=ktchat:password@tcp(localhost:3306)/ktchat?charset=utf8mb4&parseTime=True&loc=Local
-
-# JWT
-JWT_SECRET=your-secret-key-change-in-production
-
-# AWS Cognito (Optional - for production)
-AWS_REGION=ap-northeast-1
-COGNITO_USER_POOL_ID=your-user-pool-id
-COGNITO_CLIENT_ID=your-client-id
-COGNITO_CLIENT_SECRET=your-client-secret
-
-# AWS Credentials (for local development)
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
-
-# File Upload
-UPLOAD_PATH=./uploads
-MAX_FILE_SIZE=52428800
-
-# Encryption
-ENCRYPTION_KEY=your-encryption-key-32-bytes-long
-
-# Server
-PORT=8080
-```
-
-### AWS Cognito Setup
-
-For production authentication, follow the comprehensive setup guide:
-
-📖 **[AWS Cognito Setup Guide](docs/AWS_COGNITO_SETUP.md)**
-
-The guide includes:
-- Step-by-step User Pool creation
-- App client configuration
-- Environment variable setup
-- Testing procedures
-- Troubleshooting tips
-
-## 📚 API Documentation
-
-### Base URL
-- **Local**: http://localhost:8080
-- **Docker**: http://localhost:80 (via Nginx)
-
-### Authentication Endpoints
-- `POST /api/v1/auth/login` - User login (Cognito or mock)
-- `POST /api/v1/auth/register` - User registration (Cognito)
-- `POST /api/v1/auth/refresh` - Token refresh (Cognito)
-
-### Chat Endpoints
-- `GET /api/v1/chat/rooms` - Get all chat rooms
-- `POST /api/v1/chat/rooms` - Create a new chat room
-- `GET /api/v1/chat/rooms/:roomID/messages` - Get messages for a room
-- `POST /api/v1/chat/rooms/:roomID/join` - Join a chat room
-- `POST /api/v1/chat/rooms/:roomID/leave` - Leave a chat room
-
-### WebSocket
-- `GET /api/v1/ws` - WebSocket connection for real-time chat
-
-### Health Check
-- `GET /health` - Health check endpoint with Cognito status
-
-## 🔐 Authentication Flow
-
-### With AWS Cognito (Production)
-1. User registers via `/api/v1/auth/register`
-2. User confirms email (Cognito sends confirmation email)
-3. User logs in via `/api/v1/auth/login`
-4. Backend validates with Cognito and returns custom JWT
-5. Frontend uses custom JWT for API calls
-
-### Without AWS Cognito (Development)
-1. Application falls back to mock authentication
-2. Use username: `admin`, password: `password`
-3. Backend generates custom JWT tokens
-4. Same API flow as production
-
 ## 🧪 Testing
 
-### Test Scripts
+### Test AWS Cognito Integration
 ```bash
-# Test Cognito integration
+# Test the complete authentication flow
 ./scripts/test-cognito.sh
 
-# Test basic functionality
-./scripts/test-setup.sh
+# Test user confirmation flow
+./scripts/test-confirmation.sh
 ```
 
-### Manual Testing
+### Test Database Connection
 ```bash
-# Health check
-curl http://localhost:8080/health
+# Connect to PostgreSQL
+docker compose exec postgres psql -U ktchat -d ktchat
 
-# Login (mock auth)
-curl -X POST http://localhost:8080/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"password"}'
+# List tables
+\dt
+
+# Check user data
+SELECT * FROM users LIMIT 5;
 ```
 
-## 🏗️ Project Structure
+## 📊 Database Schema
 
-```
-chat-prototype/
-├── backend/                    # Go backend application
-│   ├── cmd/server/            # Application entry point
-│   ├── internal/              # Internal packages
-│   │   ├── auth/              # AWS Cognito authentication
-│   │   ├── chat/              # Chat service
-│   │   ├── database/          # Database operations
-│   │   ├── encryption/        # Message encryption
-│   │   ├── file/              # File handling
-│   │   ├── models/            # Database models
-│   │   └── websocket/         # WebSocket management
-│   ├── pkg/                   # Public packages
-│   │   ├── config/            # Configuration
-│   │   ├── middleware/        # HTTP middleware
-│   │   └── utils/             # Utilities
-│   ├── Dockerfile             # Backend container
-│   ├── Makefile               # Development commands
-│   ├── go.mod                 # Go dependencies
-│   └── README.md              # Backend documentation
-├── frontend/                  # Nuxt.js frontend (planned)
-├── laravel/                   # Laravel admin panel (planned)
-├── nginx/                     # Nginx configuration
-│   ├── nginx.conf             # Main nginx config
-│   └── conf.d/                # Server configurations
-├── scripts/                   # Utility scripts
-│   ├── init.sql               # Database initialization
-│   ├── test-setup.sh          # Environment test script
-│   └── test-cognito.sh        # Cognito integration test
-├── docs/                      # Documentation
-│   ├── AWS_COGNITO_SETUP.md   # Cognito setup guide
-│   ├── DOCKER_COMPOSE_GUIDE.md # Docker setup guide
-│   └── SETUP_GUIDE.md         # General setup guide
-├── docker-compose.yml         # Development environment
-└── README.md                  # Main project documentation
-```
+### Key Tables
+- **users**: User accounts with Cognito integration
+- **chat_rooms**: Chat rooms with privacy settings
+- **room_participants**: User participation tracking
+- **messages**: Encrypted chat messages
+- **file_attachments**: File uploads with metadata
 
-## 🛠️ Development Commands
+### PostgreSQL Optimizations
+- **UUID Primary Keys**: Using PostgreSQL's native UUID support
+- **Indexed Fields**: Optimized indexes for chat queries
+- **JSON Support**: Ready for message metadata storage
+- **Full-Text Search**: Prepared for message search functionality
 
-### Using Makefile (Backend)
+## 🔧 Development
+
+### Backend Development
 ```bash
 cd backend
 
-# Build the application
-make build
+# Install dependencies
+go mod download
 
-# Run the application
-make run
+# Run with hot reload (requires air)
+air
 
 # Run tests
-make test
+go test ./...
 
-# Format code
-make fmt
+# Build for production
+go build -o main cmd/server/main.go
+```
+
+### Database Migrations
+```bash
+# GORM auto-migration is enabled
+# Tables are created automatically on startup
+
+# Manual migration (if needed)
+docker compose exec backend go run cmd/migrate/main.go
+```
+
+### Frontend Development
+```bash
+cd frontend
 
 # Install dependencies
-make deps
+npm install
 
-# View all commands
-make help
+# Run development server
+npm run dev
+
+# Build for production
+npm run build
 ```
-
-### Using Docker Compose
-```bash
-# Start all services
-docker compose up -d
-
-# Stop all services
-docker compose down
-
-# View logs
-docker compose logs -f
-
-# Rebuild and restart
-docker compose up -d --build
-```
-
-## 🔒 Security Features
-
-- **Message Encryption**: AES-256-GCM encryption for all messages
-- **JWT Tokens**: Secure token-based authentication
-- **AWS Cognito**: Enterprise-grade user management
-- **File Validation**: Type and size validation for uploads
-- **Rate Limiting**: Basic rate limiting on API endpoints
-- **CORS Protection**: Configured CORS headers
 
 ## 🚀 Deployment
 
-### Production Checklist
-- [ ] Configure AWS Cognito User Pool
-- [ ] Set up IAM roles (no access keys)
-- [ ] Enable HTTPS
-- [ ] Configure proper CORS origins
-- [ ] Set up monitoring and logging
-- [ ] Enable MFA for user accounts
-- [ ] Configure custom domain for Cognito
+### Production Environment
+1. **Set up PostgreSQL on EC2**
+   ```bash
+   # Install PostgreSQL
+   sudo apt-get update
+   sudo apt-get install postgresql-15
+   
+   # Configure for production
+   sudo -u postgres psql
+   CREATE DATABASE ktchat_prod;
+   CREATE USER ktchat_prod WITH PASSWORD 'secure_password';
+   GRANT ALL PRIVILEGES ON DATABASE ktchat_prod TO ktchat_prod;
+   ```
 
-### EC2 Deployment
-The application is designed to be deployed on the existing EC2 instance (DEV-KTCHAT-WEB01) with Nginx as a reverse proxy.
+2. **Configure environment variables**
+   ```bash
+   # Production .env
+   DATABASE_URL=postgres://ktchat_prod:secure_password@localhost:5432/ktchat_prod?sslmode=disable
+   ENVIRONMENT=production
+   JWT_SECRET=your-secure-jwt-secret
+   ```
 
-## 📖 Documentation
+3. **Deploy with Docker**
+   ```bash
+   docker compose -f docker-compose.prod.yml up -d
+   ```
 
-- **[AWS Cognito Setup](docs/AWS_COGNITO_SETUP.md)** - Complete Cognito configuration guide
-- **[Docker Setup](docs/DOCKER_COMPOSE_GUIDE.md)** - Docker environment setup
-- **[General Setup](docs/SETUP_GUIDE.md)** - Basic setup instructions
-- **[Backend README](backend/README.md)** - Backend-specific documentation
+## 📚 Documentation
+
+- [AWS Cognito Setup](docs/AWS_COGNITO_SETUP.md)
+- [Docker Compose Guide](docs/DOCKER_COMPOSE_GUIDE.md)
+- [Setup Guide](docs/SETUP_GUIDE.md)
 
 ## 🤝 Contributing
 
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Test thoroughly
+4. Add tests if applicable
 5. Submit a pull request
 
 ## 📄 License
@@ -364,6 +283,9 @@ This project is for learning and technical verification purposes.
 
 For issues and questions:
 1. Check the documentation in the `docs/` folder
-2. Review the troubleshooting sections
-3. Check the test scripts for examples
-4. Verify your AWS Cognito configuration 
+2. Review the logs: `docker compose logs`
+3. Test individual components using the provided scripts
+
+---
+
+**Note**: This is a prototype for learning purposes. For production use, ensure proper security measures, error handling, and performance optimizations are implemented. 

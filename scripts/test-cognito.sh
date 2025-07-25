@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Test script for AWS Cognito integration
-# This script tests the authentication endpoints
+# KT Chat - AWS Cognito Integration Test Script
+# This script tests the complete authentication flow with AWS Cognito
 
 set -e
 
@@ -9,6 +9,7 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
@@ -17,155 +18,203 @@ TEST_USERNAME="testuser-$(date +%s)"
 TEST_EMAIL="test-$(date +%s)@example.com"
 TEST_PASSWORD="TestPassword123!"
 
-echo -e "${YELLOW}Testing AWS Cognito Integration${NC}"
+echo -e "${BLUE}Testing AWS Cognito Integration${NC}"
 echo "=================================="
 echo "API Base URL: $API_BASE_URL"
 echo "Test Username: $TEST_USERNAME"
 echo "Test Email: $TEST_EMAIL"
 echo ""
 
-# Function to check if server is running
-check_server() {
-    echo -e "${YELLOW}1. Checking if server is running...${NC}"
-    if curl -s "$API_BASE_URL/health" > /dev/null; then
-        echo -e "${GREEN}✓ Server is running${NC}"
-        
-        # Check if Cognito is enabled
-        RESPONSE=$(curl -s "$API_BASE_URL/health")
-        if echo "$RESPONSE" | grep -q '"cognito_enabled":true'; then
-            echo -e "${GREEN}✓ Cognito is enabled${NC}"
-        else
-            echo -e "${RED}✗ Cognito is not enabled${NC}"
-            echo "Make sure you have configured the Cognito environment variables"
-            exit 1
-        fi
+# Function to print status
+print_status() {
+    if [ $1 -eq 0 ]; then
+        echo -e "${GREEN}✓ $2${NC}"
     else
-        echo -e "${RED}✗ Server is not running${NC}"
-        echo "Please start the server first:"
-        echo "  docker compose up -d"
-        echo "  or"
-        echo "  cd backend && go run cmd/server/main.go"
+        echo -e "${RED}✗ $2${NC}"
         exit 1
     fi
-    echo ""
 }
 
-# Function to test registration
-test_registration() {
-    echo -e "${YELLOW}2. Testing user registration...${NC}"
-    
-    RESPONSE=$(curl -s -X POST "$API_BASE_URL/api/v1/auth/register" \
+# Function to check if command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Check if required commands exist
+if ! command_exists curl; then
+    echo -e "${RED}Error: curl is not installed${NC}"
+    exit 1
+fi
+
+if ! command_exists jq; then
+    echo -e "${YELLOW}Warning: jq is not installed. JSON responses will not be formatted.${NC}"
+    JQ_AVAILABLE=false
+else
+    JQ_AVAILABLE=true
+fi
+
+# 1. Check if server is running
+echo -e "${BLUE}1. Checking if server is running...${NC}"
+if curl -s "$API_BASE_URL/health" > /dev/null; then
+    print_status 0 "Server is running"
+else
+    print_status 1 "Server is not running"
+fi
+
+# 2. Check Cognito configuration
+echo -e "${BLUE}2. Checking Cognito configuration...${NC}"
+HEALTH_RESPONSE=$(curl -s "$API_BASE_URL/health")
+if echo "$HEALTH_RESPONSE" | grep -q "cognito.*enabled.*true"; then
+    print_status 0 "Cognito is enabled"
+    COGNITO_ENABLED=true
+elif echo "$HEALTH_RESPONSE" | grep -q "cognito.*enabled.*false"; then
+    print_status 1 "Cognito is not enabled"
+    COGNITO_ENABLED=false
+else
+    echo -e "${YELLOW}Warning: Could not determine Cognito status${NC}"
+    COGNITO_ENABLED=false
+fi
+
+# 3. Test registration
+echo -e "${BLUE}3. Testing user registration...${NC}"
+REGISTER_RESPONSE=$(curl -s -X POST "$API_BASE_URL/api/v1/auth/register" \
+    -H "Content-Type: application/json" \
+    -d "{
+        \"username\": \"$TEST_USERNAME\",
+        \"email\": \"$TEST_EMAIL\",
+        \"password\": \"$TEST_PASSWORD\"
+    }")
+
+if [ "$JQ_AVAILABLE" = true ]; then
+    echo "Registration Response:"
+    echo "$REGISTER_RESPONSE" | jq .
+else
+    echo "Registration Response: $REGISTER_RESPONSE"
+fi
+
+# Check if registration was successful
+if echo "$REGISTER_RESPONSE" | grep -q "success.*true" || echo "$REGISTER_RESPONSE" | grep -q "User registered successfully"; then
+    print_status 0 "User registration successful"
+elif echo "$REGISTER_RESPONSE" | grep -q "UsernameExistsException"; then
+    print_status 0 "User already exists (expected for repeated tests)"
+else
+    print_status 1 "User registration failed"
+    echo "Response: $REGISTER_RESPONSE"
+fi
+
+# 4. Test login (should fail if user is not confirmed)
+echo -e "${BLUE}4. Testing login (should fail if user not confirmed)...${NC}"
+LOGIN_RESPONSE=$(curl -s -X POST "$API_BASE_URL/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{
+        \"username\": \"$TEST_USERNAME\",
+        \"password\": \"$TEST_PASSWORD\"
+    }")
+
+if [ "$JQ_AVAILABLE" = true ]; then
+    echo "Login Response:"
+    echo "$LOGIN_RESPONSE" | jq .
+else
+    echo "Login Response: $LOGIN_RESPONSE"
+fi
+
+# Check login response
+if echo "$LOGIN_RESPONSE" | grep -q "USER_NOT_CONFIRMED"; then
+    print_status 0 "Login correctly failed - user not confirmed"
+    USER_CONFIRMED=false
+elif echo "$LOGIN_RESPONSE" | grep -q "token"; then
+    print_status 0 "Login successful - user is confirmed"
+    USER_CONFIRMED=true
+else
+    print_status 1 "Login failed unexpectedly"
+    echo "Response: $LOGIN_RESPONSE"
+fi
+
+# 5. Test resend confirmation code (if user not confirmed)
+if [ "$USER_CONFIRMED" = false ]; then
+    echo -e "${BLUE}5. Testing resend confirmation code...${NC}"
+    RESEND_RESPONSE=$(curl -s -X POST "$API_BASE_URL/api/v1/auth/resend-confirmation" \
         -H "Content-Type: application/json" \
         -d "{
-            \"username\": \"$TEST_USERNAME\",
-            \"email\": \"$TEST_EMAIL\",
-            \"password\": \"$TEST_PASSWORD\"
+            \"username\": \"$TEST_USERNAME\"
         }")
-    
-    if echo "$RESPONSE" | grep -q '"message":"User registered successfully'; then
-        echo -e "${GREEN}✓ Registration successful${NC}"
-        echo "Note: User needs to confirm email before login"
-    else
-        echo -e "${RED}✗ Registration failed${NC}"
-        echo "Response: $RESPONSE"
-        echo ""
-        echo "This might be expected if:"
-        echo "- Cognito is not properly configured"
-        echo "- Email already exists"
-        echo "- Password doesn't meet requirements"
-    fi
-    echo ""
-}
 
-# Function to test login (will fail if user not confirmed)
-test_login() {
-    echo -e "${YELLOW}3. Testing user login...${NC}"
+    if [ "$JQ_AVAILABLE" = true ]; then
+        echo "Resend Response:"
+        echo "$RESEND_RESPONSE" | jq .
+    else
+        echo "Resend Response: $RESEND_RESPONSE"
+    fi
+
+    if echo "$RESEND_RESPONSE" | grep -q "success.*true" || echo "$RESEND_RESPONSE" | grep -q "Confirmation code sent"; then
+        print_status 0 "Resend confirmation code successful"
+    else
+        print_status 1 "Resend confirmation code failed"
+        echo "Response: $RESEND_RESPONSE"
+    fi
+fi
+
+# 6. Test with existing admin user (if available)
+echo -e "${BLUE}6. Testing with existing admin user...${NC}"
+ADMIN_LOGIN_RESPONSE=$(curl -s -X POST "$API_BASE_URL/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "username": "admin",
+        "password": "$liferFire18"
+    }')
+
+if [ "$JQ_AVAILABLE" = true ]; then
+    echo "Admin Login Response:"
+    echo "$ADMIN_LOGIN_RESPONSE" | jq .
+else
+    echo "Admin Login Response: $ADMIN_LOGIN_RESPONSE"
+fi
+
+if echo "$ADMIN_LOGIN_RESPONSE" | grep -q "token"; then
+    print_status 0 "Admin login successful"
     
-    RESPONSE=$(curl -s -X POST "$API_BASE_URL/api/v1/auth/login" \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"username\": \"$TEST_USERNAME\",
-            \"password\": \"$TEST_PASSWORD\"
-        }")
+    # Extract token for further testing
+    if [ "$JQ_AVAILABLE" = true ]; then
+        TOKEN=$(echo "$ADMIN_LOGIN_RESPONSE" | jq -r '.token')
+    else
+        TOKEN=$(echo "$ADMIN_LOGIN_RESPONSE" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+    fi
     
-    if echo "$RESPONSE" | grep -q '"token"'; then
-        echo -e "${GREEN}✓ Login successful${NC}"
+    if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
+        echo -e "${GREEN}✓ JWT token extracted successfully${NC}"
         
-        # Extract token for further testing
-        TOKEN=$(echo "$RESPONSE" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
-        echo "Token received: ${TOKEN:0:20}..."
+        # Test authenticated endpoint
+        echo -e "${BLUE}7. Testing authenticated endpoint...${NC}"
+        AUTH_RESPONSE=$(curl -s -X GET "$API_BASE_URL/api/v1/chat/rooms" \
+            -H "Authorization: Bearer $TOKEN")
         
-        # Test protected endpoint
-        test_protected_endpoint "$TOKEN"
-    else
-        echo -e "${YELLOW}⚠ Login failed (expected if user not confirmed)${NC}"
-        echo "Response: $RESPONSE"
-        echo ""
-        echo "This is expected if:"
-        echo "- User hasn't confirmed their email"
-        echo "- User doesn't exist in Cognito"
-        echo "- Credentials are incorrect"
+        if [ "$JQ_AVAILABLE" = true ]; then
+            echo "Authenticated Response:"
+            echo "$AUTH_RESPONSE" | jq .
+        else
+            echo "Authenticated Response: $AUTH_RESPONSE"
+        fi
+        
+        if echo "$AUTH_RESPONSE" | grep -q "rooms" || echo "$AUTH_RESPONSE" | grep -q "\[\]"; then
+            print_status 0 "Authenticated endpoint working"
+        else
+            print_status 1 "Authenticated endpoint failed"
+        fi
     fi
-    echo ""
-}
+else
+    print_status 1 "Admin login failed"
+    echo "Response: $ADMIN_LOGIN_RESPONSE"
+fi
 
-# Function to test protected endpoint
-test_protected_endpoint() {
-    local token=$1
-    echo -e "${YELLOW}4. Testing protected endpoint...${NC}"
-    
-    RESPONSE=$(curl -s -X GET "$API_BASE_URL/api/v1/chat/rooms" \
-        -H "Authorization: Bearer $token")
-    
-    if echo "$RESPONSE" | grep -q '"rooms"'; then
-        echo -e "${GREEN}✓ Protected endpoint accessible${NC}"
-    else
-        echo -e "${RED}✗ Protected endpoint failed${NC}"
-        echo "Response: $RESPONSE"
-    fi
-    echo ""
-}
-
-# Function to test token refresh
-test_token_refresh() {
-    echo -e "${YELLOW}5. Testing token refresh...${NC}"
-    echo -e "${YELLOW}   (This requires a valid refresh token from login)${NC}"
-    echo -e "${YELLOW}   Skipping for now...${NC}"
-    echo ""
-}
-
-# Function to show next steps
-show_next_steps() {
-    echo -e "${YELLOW}Next Steps:${NC}"
-    echo "=========="
-    echo ""
-    echo "1. Configure AWS Cognito User Pool:"
-    echo "   - Follow the guide in docs/AWS_COGNITO_SETUP.md"
-    echo ""
-    echo "2. Set up environment variables:"
-    echo "   - Copy env.example to .env in backend directory"
-    echo "   - Fill in your Cognito configuration"
-    echo ""
-    echo "3. For testing with confirmed users:"
-    echo "   - Use AWS Console to confirm test users"
-    echo "   - Or configure email verification"
-    echo ""
-    echo "4. Test with the frontend:"
-    echo "   - Start the frontend: cd frontend && npm run dev"
-    echo "   - Try logging in through the web interface"
-    echo ""
-}
-
-# Main execution
-main() {
-    check_server
-    test_registration
-    test_login
-    test_token_refresh
-    show_next_steps
-    
-    echo -e "${GREEN}Test completed!${NC}"
-}
-
-# Run main function
-main 
+echo ""
+echo -e "${GREEN}✅ Cognito integration test completed!${NC}"
+echo ""
+echo -e "${YELLOW}📝 Notes:${NC}"
+echo "- If user registration succeeded, check your email for confirmation code"
+echo "- If login failed with 'USER_NOT_CONFIRMED', use the confirmation code to confirm the account"
+echo "- You can test the frontend confirmation flow at: http://localhost:3000/login"
+echo ""
+echo -e "${BLUE}🔗 Useful Commands:${NC}"
+echo "View logs: docker compose logs backend"
+echo "Check database: docker compose exec postgres psql -U ktchat -d ktchat -c '\\dt'"
+echo "Test health: curl http://localhost:8080/health" 
