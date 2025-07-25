@@ -1,0 +1,44 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 22  # Updated to Node.js 22
+    commands:
+      - echo "Installing dependencies..."
+      - echo "Node.js version: $(node --version)"
+      - echo "npm version: $(npm --version)"
+      - npm install
+      
+  pre_build:
+    commands:
+      - echo "Setting up environment variables..."
+      - echo "API_BASE_URL=$API_BASE_URL" >> .env
+      - echo "WS_URL=$WS_URL" >> .env
+      - echo "NODE_ENV=production" >> .env
+      - echo "Environment variables set:"
+      - cat .env
+      
+  build:
+    commands:
+      - echo "Building Nuxt.js 4 application..."
+      - npm run build
+      - echo "Build completed successfully"
+      - echo "Build output:"
+      - ls -la .output/
+      
+  post_build:
+    commands:
+      - echo "Deploying to S3..."
+      - aws s3 sync .output/public/ s3://$S3_BUCKET_NAME/ --delete
+      - echo "Deployment completed successfully"
+
+artifacts:
+  files:
+    - .output/**/*
+  discard-paths: no
+  base-directory: .output
+
+cache:
+  paths:
+    - 'node_modules/**/*'
