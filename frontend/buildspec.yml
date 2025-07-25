@@ -21,8 +21,3 @@ phases:
   post_build:
     commands:
       - aws s3 sync .output/public/ s3://$S3_BUCKET_NAME/ --delete
-
-artifacts:
-  files:
-    - .output/**/*
-  base-directory: .output

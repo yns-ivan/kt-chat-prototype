@@ -38,7 +38,11 @@ export default defineNuxtConfig({
 
   // Build configuration for SPA
   nitro: {
-    static: true
+    static: true,
+    prerender: {
+      crawlLinks: false,
+      routes: ['/']
+    }
   },
 
   // Development server
