@@ -10,22 +10,19 @@ phases:
 
   pre_build:
     commands:
-      - cd frontend
       - echo "API_BASE_URL=$API_BASE_URL" >> .env
       - echo "WS_URL=$WS_URL" >> .env
       - echo "NODE_ENV=production" >> .env
 
   build:
     commands:
-      - cd frontend
       - npm run build
-      
+
   post_build:
     commands:
-      - cd frontend
       - aws s3 sync .output/public/ s3://$S3_BUCKET_NAME/ --delete
 
 artifacts:
   files:
-    - frontend/.output/**/*
-  base-directory: frontend/.output
+    - .output/**/*
+  base-directory: .output
