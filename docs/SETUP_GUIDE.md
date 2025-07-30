@@ -8,7 +8,7 @@ This guide provides comprehensive instructions for setting up the KT Chat protot
 - **Docker & Docker Compose** (recommended)
 - **Go 1.24.5+** (for local development)
 - **PostgreSQL 15+** (for local development without Docker)
-- **Node.js 18+** (for frontend development)
+- **Node.js 22.12.0** (for frontend development)
 
 ### Optional Software
 - **AWS CLI** (for AWS Cognito setup)

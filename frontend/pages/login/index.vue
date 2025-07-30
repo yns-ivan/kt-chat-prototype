@@ -376,8 +376,9 @@ const handleConfirm = async () => {
   confirmationSuccess.value = ''
 
   try {
+    const config = useRuntimeConfig()
     await $fetch('/api/v1/auth/confirm', {
-      baseURL: 'http://localhost:8080',
+      baseURL: config.public.apiBaseUrl,
       method: 'POST',
       body: {
         username: pendingConfirmationUsername.value,
@@ -414,8 +415,9 @@ const handleResendCode = async () => {
   confirmationError.value = ''
 
   try {
+    const config = useRuntimeConfig()
     await $fetch('/api/v1/auth/resend-confirmation', {
-      baseURL: 'http://localhost:8080',
+      baseURL: config.public.apiBaseUrl,
       method: 'POST',
       body: {
         username: pendingConfirmationUsername.value
