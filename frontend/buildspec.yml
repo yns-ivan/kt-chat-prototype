@@ -20,4 +20,7 @@ phases:
 
   post_build:
     commands:
+      - echo "Deploying to S3..."
       - aws s3 sync .output/public/ s3://$S3_BUCKET_NAME/ --delete
+      - echo "Creating CloudFront cache invalidation..."
+      - aws cloudfront create-invalidation --distribution-id $CLOUDFRONT_DISTRIBUTION_ID --paths "/*"
