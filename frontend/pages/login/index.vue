@@ -390,8 +390,7 @@ const handleConfirm = async () => {
     // Close confirmation modal after 2 seconds
     setTimeout(() => {
       closeConfirmation()
-      // Try to login automatically
-      handleLogin()
+      // Don't auto-login, let user login manually
     }, 2000)
 
   } catch (error) {
@@ -452,5 +451,10 @@ const closeConfirmation = () => {
   confirmationError.value = ''
   confirmationSuccess.value = ''
   pendingConfirmationUsername.value = ''
+  
+  // Clear the login form to force user to re-enter credentials
+  form.value.username = ''
+  form.value.password = ''
+  error.value = ''
 }
 </script> 

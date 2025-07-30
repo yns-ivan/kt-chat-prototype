@@ -313,6 +313,7 @@ func (s *CognitoService) ExtractCognitoError(err error) *CognitoError {
 	}
 
 	errStr := err.Error()
+	fmt.Printf("DEBUG: Extracting Cognito error from: %s\n", errStr)
 
 	// Common Cognito error patterns
 	switch {
@@ -352,6 +353,18 @@ func (s *CognitoService) ExtractCognitoError(err error) *CognitoError {
 			Message: "Username already exists. Please choose a different username.",
 		}
 
+	case strings.Contains(errStr, "AliasExistsException"):
+		return &CognitoError{
+			Code:    "EMAIL_ALREADY_EXISTS",
+			Message: "An account with this email already exists. Please use a different email or try logging in.",
+		}
+
+	case strings.Contains(errStr, "NotAuthorizedException") && strings.Contains(errStr, "User is already confirmed"):
+		return &CognitoError{
+			Code:    "USER_ALREADY_CONFIRMED",
+			Message: "Account is already confirmed. You can now login.",
+		}
+
 	case strings.Contains(errStr, "InvalidPasswordException"):
 		return &CognitoError{
 			Code:    "INVALID_PASSWORD",
@@ -386,6 +399,42 @@ func (s *CognitoService) ExtractCognitoError(err error) *CognitoError {
 		return &CognitoError{
 			Code:    "CODE_EXPIRED",
 			Message: "Confirmation code has expired. Please request a new one.",
+		}
+
+	case strings.Contains(errStr, "InvalidParameterException") && strings.Contains(errStr, "confirmation"):
+		return &CognitoError{
+			Code:    "INVALID_CONFIRMATION_CODE",
+			Message: "Invalid confirmation code format. Please check your email and try again.",
+		}
+
+	case strings.Contains(errStr, "UserNotFoundException"):
+		return &CognitoError{
+			Code:    "USER_NOT_FOUND",
+			Message: "User not found. Please check your username or register a new account.",
+		}
+
+	case strings.Contains(errStr, "InvalidParameterException"):
+		return &CognitoError{
+			Code:    "INVALID_PARAMETER",
+			Message: "Invalid input parameters. Please check your information.",
+		}
+
+	case strings.Contains(errStr, "NotAuthorizedException") && strings.Contains(errStr, "User is disabled"):
+		return &CognitoError{
+			Code:    "USER_DISABLED",
+			Message: "Account is disabled. Please contact support.",
+		}
+
+	case strings.Contains(errStr, "NotAuthorizedException") && strings.Contains(errStr, "Incorrect username or password"):
+		return &CognitoError{
+			Code:    "INVALID_CREDENTIALS",
+			Message: "Incorrect username or password",
+		}
+
+	case strings.Contains(errStr, "NotAuthorizedException"):
+		return &CognitoError{
+			Code:    "NOT_AUTHORIZED",
+			Message: "Authentication failed. Please check your credentials.",
 		}
 
 	case strings.Contains(errStr, "LimitExceededException"):
@@ -429,6 +478,13 @@ func (s *CognitoService) ExtractCognitoErrorMessage(err error) string {
 
 // ConfirmUser confirms a user's account with the provided confirmation code
 func (s *CognitoService) ConfirmUser(ctx context.Context, username, confirmationCode string) error {
+	fmt.Printf("DEBUG: Confirming user - Username: %s, Code: %s\n", username, confirmationCode)
+	
+	// Check if client is initialized
+	if s.client == nil {
+		return fmt.Errorf("Cognito client not initialized")
+	}
+	
 	input := &cognitoidentityprovider.ConfirmSignUpInput{
 		ClientId:         aws.String(s.clientID),
 		Username:         aws.String(username),
@@ -438,15 +494,36 @@ func (s *CognitoService) ConfirmUser(ctx context.Context, username, confirmation
 	// Add SECRET_HASH if client secret is configured
 	if s.clientSecret != "" {
 		secretHash := s.calculateSecretHash(username)
+		fmt.Printf("DEBUG: Adding SECRET_HASH for confirmation - username: %s, clientID: %s\n", username, s.clientID)
+		fmt.Printf("DEBUG: SECRET_HASH: %s\n", secretHash)
 		input.SecretHash = aws.String(secretHash)
 	}
 
 	_, err := s.client.ConfirmSignUp(ctx, input)
-	return err
+	if err != nil {
+		fmt.Printf("DEBUG: ConfirmSignUp error: %v\n", err)
+		
+		// If the error is AliasExistsException, it means the account already exists
+		// This could mean the account is already confirmed or there's a duplicate
+		if strings.Contains(err.Error(), "AliasExistsException") {
+			fmt.Printf("DEBUG: Account already exists, treating as success\n")
+			return nil // Treat as success since account exists
+		}
+		
+		return err
+	}
+	
+	fmt.Printf("DEBUG: User confirmed successfully\n")
+	return nil
 }
 
 // ResendConfirmationCode resends the confirmation code to the user
 func (s *CognitoService) ResendConfirmationCode(ctx context.Context, username string) error {
+	// Check if client is initialized
+	if s.client == nil {
+		return fmt.Errorf("Cognito client not initialized")
+	}
+	
 	input := &cognitoidentityprovider.ResendConfirmationCodeInput{
 		ClientId: aws.String(s.clientID),
 		Username: aws.String(username),

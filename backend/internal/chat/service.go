@@ -528,6 +528,7 @@ func (s *Service) ConfirmUser(c *gin.Context) {
 	}
 	
 	if err := c.ShouldBindJSON(&req); err != nil {
+		fmt.Printf("DEBUG: ConfirmUser request binding error: %v\n", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
 			"code":    "INVALID_REQUEST",
 			"message": err.Error(),
@@ -535,13 +536,28 @@ func (s *Service) ConfirmUser(c *gin.Context) {
 		return
 	}
 
+	fmt.Printf("DEBUG: ConfirmUser request - Username: %s, Code: %s\n", req.Username, req.ConfirmationCode)
+
+	// Check if Cognito service is available
+	if s.cognitoAuth == nil {
+		fmt.Printf("DEBUG: Cognito service is nil\n")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{
+			"code":    "SERVICE_UNAVAILABLE",
+			"message": "Authentication service is not available",
+		}})
+		return
+	}
+
 	err := s.cognitoAuth.ConfirmUser(c.Request.Context(), req.Username, req.ConfirmationCode)
 	if err != nil {
+		fmt.Printf("DEBUG: ConfirmUser Cognito error: %v\n", err)
 		cognitoError := s.cognitoAuth.ExtractCognitoError(err)
+		fmt.Printf("DEBUG: Extracted Cognito error: %+v\n", cognitoError)
 		c.JSON(http.StatusBadRequest, gin.H{"error": cognitoError})
 		return
 	}
 
+	fmt.Printf("DEBUG: User confirmed successfully in service\n")
 	c.JSON(http.StatusOK, gin.H{"message": "User confirmed successfully"})
 }
 
@@ -555,6 +571,16 @@ func (s *Service) ResendConfirmationCode(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
 			"code":    "INVALID_REQUEST",
 			"message": err.Error(),
+		}})
+		return
+	}
+
+	// Check if Cognito service is available
+	if s.cognitoAuth == nil {
+		fmt.Printf("DEBUG: Cognito service is nil\n")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{
+			"code":    "SERVICE_UNAVAILABLE",
+			"message": "Authentication service is not available",
 		}})
 		return
 	}
