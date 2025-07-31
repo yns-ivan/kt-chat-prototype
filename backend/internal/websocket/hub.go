@@ -56,6 +56,7 @@ type Message struct {
 	Content   string      `json:"content"`
 	Timestamp string      `json:"timestamp"`
 	Files     []FileInfo  `json:"files,omitempty"`
+	ParticipantCount int  `json:"participant_count,omitempty"`
 }
 
 // FileInfo represents file attachment information
@@ -178,6 +179,9 @@ func HandleWebSocket(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	username := r.URL.Query().Get("username")
 	roomID := r.URL.Query().Get("room_id")
 
+	// Log the connection details for debugging
+	log.Printf("WebSocket connection: userID=%s, username=%s, roomID=%s", userID, username, roomID)
+
 	client := &Client{
 		hub:      hub,
 		conn:     conn,
@@ -229,6 +233,10 @@ func (c *Client) readPump() {
 		msg.Username = c.username
 		msg.RoomID = c.roomID
 		msg.Timestamp = time.Now().Format(time.RFC3339)
+
+		// Log the message for debugging
+		log.Printf("WebSocket message: UserID=%s, Username=%s, RoomID=%s, Content=%s", 
+			msg.UserID, msg.Username, msg.RoomID, msg.Content)
 
 		// Broadcast to room
 		if msgBytes, err := json.Marshal(msg); err == nil {

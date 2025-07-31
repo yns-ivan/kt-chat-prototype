@@ -283,9 +283,20 @@ func (s *Service) RefreshToken(c *gin.Context) {
 // GetRooms returns all available chat rooms
 func (s *Service) GetRooms(c *gin.Context) {
 	var rooms []models.ChatRoom
-	if err := s.db.Preload("CreatedByUser").Find(&rooms).Error; err != nil {
+	if err := s.db.Preload("CreatedByUser").Preload("Participants.User").Find(&rooms).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch rooms"})
 		return
+	}
+
+	// Filter out participants who have left the room (left_at IS NOT NULL)
+	for i := range rooms {
+		var activeParticipants []models.RoomParticipant
+		for _, participant := range rooms[i].Participants {
+			if participant.LeftAt == nil {
+				activeParticipants = append(activeParticipants, participant)
+			}
+		}
+		rooms[i].Participants = activeParticipants
 	}
 
 	c.JSON(http.StatusOK, gin.H{"rooms": rooms})
@@ -321,6 +332,32 @@ func (s *Service) CreateRoom(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"room": room})
 }
 
+// GetRoom returns a specific room with its participants
+func (s *Service) GetRoom(c *gin.Context) {
+	roomID := c.Param("roomID")
+	if roomID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Room ID is required"})
+		return
+	}
+
+	var room models.ChatRoom
+	if err := s.db.Preload("CreatedByUser").Preload("Participants.User").Where("id = ?", roomID).First(&room).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
+		return
+	}
+
+	// Filter out participants who have left the room
+	var activeParticipants []models.RoomParticipant
+	for _, participant := range room.Participants {
+		if participant.LeftAt == nil {
+			activeParticipants = append(activeParticipants, participant)
+		}
+	}
+	room.Participants = activeParticipants
+
+	c.JSON(http.StatusOK, gin.H{"room": room})
+}
+
 // GetMessages returns messages for a specific room
 func (s *Service) GetMessages(c *gin.Context) {
 	roomID := c.Param("roomID")
@@ -330,7 +367,7 @@ func (s *Service) GetMessages(c *gin.Context) {
 	}
 
 	var messages []models.Message
-	if err := s.db.Preload("User").Preload("Files").Where("room_id = ?", roomID).Order("created_at desc").Limit(50).Find(&messages).Error; err != nil {
+	if err := s.db.Preload("User").Preload("Files").Where("room_id = ?", roomID).Order("created_at asc").Limit(50).Find(&messages).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch messages"})
 		return
 	}
@@ -351,16 +388,23 @@ func (s *Service) GetMessages(c *gin.Context) {
 // JoinRoom adds a user to a chat room
 func (s *Service) JoinRoom(c *gin.Context) {
 	roomID := c.Param("roomID")
-	userID := c.GetString("user_id")
+	cognitoUserID := c.GetString("user_id")
 
-	if roomID == "" || userID == "" {
+	if roomID == "" || cognitoUserID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Room ID and user ID are required"})
+		return
+	}
+
+	// Look up the internal user ID using the Cognito ID
+	var user models.User
+	if err := s.db.Where("cognito_id = ?", cognitoUserID).First(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User not found"})
 		return
 	}
 
 	// Check if user is already in the room
 	var existing models.RoomParticipant
-	if err := s.db.Where("room_id = ? AND user_id = ? AND left_at IS NULL", roomID, userID).First(&existing).Error; err == nil {
+	if err := s.db.Where("room_id = ? AND user_id = ? AND left_at IS NULL", roomID, user.ID).First(&existing).Error; err == nil {
 		c.JSON(http.StatusOK, gin.H{"message": "User already in room"})
 		return
 	}
@@ -368,7 +412,7 @@ func (s *Service) JoinRoom(c *gin.Context) {
 	participant := models.RoomParticipant{
 		ID:       uuid.New().String(),
 		RoomID:   roomID,
-		UserID:   userID,
+		UserID:   user.ID, // Use the internal user ID
 		JoinedAt: time.Now(),
 	}
 
@@ -377,24 +421,37 @@ func (s *Service) JoinRoom(c *gin.Context) {
 		return
 	}
 
+	// Broadcast participant count update
+	s.broadcastParticipantCount(roomID)
+
 	c.JSON(http.StatusOK, gin.H{"message": "Joined room successfully"})
 }
 
 // LeaveRoom removes a user from a chat room
 func (s *Service) LeaveRoom(c *gin.Context) {
 	roomID := c.Param("roomID")
-	userID := c.GetString("user_id")
+	cognitoUserID := c.GetString("user_id")
 
-	if roomID == "" || userID == "" {
+	if roomID == "" || cognitoUserID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Room ID and user ID are required"})
 		return
 	}
 
+	// Look up the internal user ID using the Cognito ID
+	var user models.User
+	if err := s.db.Where("cognito_id = ?", cognitoUserID).First(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User not found"})
+		return
+	}
+
 	now := time.Now()
-	if err := s.db.Model(&models.RoomParticipant{}).Where("room_id = ? AND user_id = ? AND left_at IS NULL", roomID, userID).Update("left_at", now).Error; err != nil {
+	if err := s.db.Model(&models.RoomParticipant{}).Where("room_id = ? AND user_id = ? AND left_at IS NULL", roomID, user.ID).Update("left_at", now).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to leave room"})
 		return
 	}
+
+	// Broadcast participant count update
+	s.broadcastParticipantCount(roomID)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Left room successfully"})
 }
@@ -442,13 +499,19 @@ func (s *Service) SendMessage(c *gin.Context) {
 		return
 	}
 
+	// Get current participant count
+	var participantCount int64
+	s.db.Model(&models.RoomParticipant{}).Where("room_id = ? AND left_at IS NULL", roomID).Count(&participantCount)
+
 	// Broadcast message via WebSocket
 	wsMessage := websocket.Message{
-		Type:      "message",
-		RoomID:    roomID,
-		UserID:    user.ID, // Use the internal user ID
-		Content:   req.Content, // Send decrypted content to WebSocket
-		Timestamp: time.Now().Format(time.RFC3339),
+		Type:             "message",
+		RoomID:           roomID,
+		UserID:           user.ID, // Use the internal user ID
+		Username:         user.Username, // Include the username
+		Content:          req.Content, // Send decrypted content to WebSocket
+		Timestamp:        message.CreatedAt.Format(time.RFC3339), // Use the same timestamp as the database record
+		ParticipantCount: int(participantCount),
 	}
 
 	if msgBytes, err := json.Marshal(wsMessage); err == nil {
@@ -593,4 +656,20 @@ func (s *Service) ResendConfirmationCode(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Confirmation code sent successfully"})
+}
+
+// broadcastParticipantCount broadcasts the current participant count to all clients in a room
+func (s *Service) broadcastParticipantCount(roomID string) {
+	var participantCount int64
+	s.db.Model(&models.RoomParticipant{}).Where("room_id = ? AND left_at IS NULL", roomID).Count(&participantCount)
+
+	wsMessage := websocket.Message{
+		Type:             "participant_count",
+		RoomID:           roomID,
+		ParticipantCount: int(participantCount),
+	}
+
+	if msgBytes, err := json.Marshal(wsMessage); err == nil {
+		s.hub.BroadcastToRoom(roomID, msgBytes)
+	}
 } 

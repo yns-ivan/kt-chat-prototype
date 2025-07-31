@@ -91,6 +91,7 @@ func main() {
 		chatRoutes.Use(middleware.AuthMiddleware(cfg.JWTSecret, cognitoAuth))
 		{
 			chatRoutes.GET("/rooms", chatService.GetRooms)
+			chatRoutes.GET("/rooms/:roomID", chatService.GetRoom)
 			chatRoutes.POST("/rooms", chatService.CreateRoom)
 			chatRoutes.GET("/rooms/:roomID/messages", chatService.GetMessages)
 			chatRoutes.POST("/rooms/:roomID/messages", chatService.SendMessage)

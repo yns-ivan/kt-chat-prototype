@@ -5,6 +5,9 @@ interface ChatMessage {
   username: string
   content: string
   timestamp: string
+  created_at?: string
+  createdAt?: string
+  participant_count?: number
   files?: unknown[]
 }
 
@@ -36,10 +39,17 @@ export const useWebSocket = () => {
     reconnectAttempts.value = 0
     currentRoomId.value = roomId
 
+    // Debug: Log user data
+    console.log('WebSocket connection user data:', {
+      id: user.value.id,
+      username: user.value.username,
+      roomId: roomId
+    })
+
     // Construct WebSocket URL properly
     const baseUrl = config.public.apiBaseUrl.replace(/\/$/, '') // Remove trailing slash if present
     const wsUrl = baseUrl.replace(/^http/, 'ws')
-    const url = `${wsUrl}/api/v1/ws?user_id=${user.value.id}&username=${user.value.username}&room_id=${roomId}`
+    const url = `${wsUrl}/api/v1/ws?user_id=${user.value.id}&username=${encodeURIComponent(user.value.username)}&room_id=${roomId}`
     
     socket.value = new WebSocket(url)
 
@@ -52,7 +62,14 @@ export const useWebSocket = () => {
     socket.value.onmessage = (event) => {
       try {
         const message: ChatMessage = JSON.parse(event.data)
+        console.log('WebSocket message received:', message)
         messages.value.push(message)
+        
+        // Emit participant count update if provided
+        if (message.participant_count !== undefined) {
+          // We'll handle this in the main component
+          console.log('Participant count update:', message.participant_count)
+        }
       } catch (error) {
         console.error('Failed to parse WebSocket message:', error)
       }

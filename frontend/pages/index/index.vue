@@ -1,7 +1,7 @@
 <template>
-  <div v-if="!isInitializing" style="height: 100vh; display: flex;">
+  <div v-if="!isInitializing" style="height: 100vh; display: flex; overflow: hidden;">
     <!-- Sidebar - Chat Rooms -->
-    <div style="width: 320px; background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); border-right: 1px solid rgba(0, 0, 0, 0.1); display: flex; flex-direction: column; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);">
+    <div style="width: 320px; background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); border-right: 1px solid rgba(0, 0, 0, 0.1); display: flex; flex-direction: column; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); min-height: 0;">
       <!-- Header -->
       <div style="padding: 24px; border-bottom: 1px solid rgba(0, 0, 0, 0.1);">
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
@@ -51,7 +51,7 @@
       </div>
 
       <!-- Room List -->
-      <div style="flex: 1; overflow-y: auto;">
+      <div style="flex: 1; overflow-y: auto; min-height: 0; scroll-behavior: smooth;">
         <div v-if="loading" style="padding: 16px;">
           <div style="height: 48px; width: 100%; background: #f3f4f6; border-radius: 8px; margin-bottom: 8px;"></div>
           <div style="height: 48px; width: 100%; background: #f3f4f6; border-radius: 8px; margin-bottom: 8px;"></div>
@@ -67,7 +67,7 @@
  
         </div>
 
-        <div v-else style="padding: 16px; display: flex; flex-direction: column; gap: 8px;">
+        <div v-else style="padding: 16px; display: flex; flex-direction: column; gap: 8px; min-height: 0;">
           <div
             v-for="room in rooms"
             :key="room.id"
@@ -104,7 +104,7 @@
     </div>
 
     <!-- Main Chat Area -->
-    <div style="flex: 1; display: flex; flex-direction: column;">
+    <div style="flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
       <!-- Chat Header -->
       <div v-if="selectedRoom" style="background: white; border-bottom: 1px solid #e5e7eb; padding: 16px;">
         <div class="flex items-center justify-between">
@@ -148,9 +148,9 @@
       </div>
 
       <!-- Messages Area -->
-      <div v-if="selectedRoom" class="flex-1 flex flex-col">
+      <div v-if="selectedRoom" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
         <!-- Messages List -->
-        <div class="flex-1 overflow-y-auto p-4 space-y-4">
+        <div ref="messagesContainer" style="flex: 1; overflow-y: auto; padding: 16px; min-height: 0; scroll-behavior: smooth;">
           <div v-if="messagesLoading" class="flex justify-center">
             <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin text-gray-400" />
           </div>
@@ -159,20 +159,30 @@
             <p>No messages yet. Start the conversation!</p>
           </div>
 
-          <div v-else class="space-y-4">
+          <div v-else style="display: flex; flex-direction: column; gap: 16px;">
             <div
               v-for="message in allMessages"
               :key="message.id || message.timestamp"
-              class="flex space-x-3"
-              :class="{ 'flex-row-reverse space-x-reverse': message.userId === currentUser?.id || message.user_id === currentUser?.id }"
+              style="display: flex; gap: 12px;"
+              :style="{ flexDirection: (message.userId === currentUser?.id || message.user_id === currentUser?.id) ? 'row-reverse' : 'row' }"
             >
               <div style="width: 32px; height: 32px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px;">
-                {{ (message.user?.username || message.username || '?').charAt(0).toUpperCase() }}
+                {{ getMessageUserInitial(message) }}
               </div>
               <div
-                style="max-width: 320px;"
-                :style="{ display: 'flex', flexDirection: 'column', alignItems: (message.userId === currentUser?.id || message.user_id === currentUser?.id) ? 'flex-end' : 'flex-start' }"
+                style="max-width: 350px; display: flex; flex-direction: column;"
+                :style="{ alignItems: (message.userId === currentUser?.id || message.user_id === currentUser?.id) ? 'flex-end' : 'flex-start' }"
               >
+                <!-- Username display -->
+                <p 
+                  style="font-size: 11px; margin-bottom: 4px; font-weight: 600; text-transform: capitalize; padding: 2px 6px; border-radius: 4px; display: inline-block;"
+                  :style="{ 
+                    color: (message.userId === currentUser?.id || message.user_id === currentUser?.id) ? '#3b82f6' : '#374151',
+                    background: (message.userId === currentUser?.id || message.user_id === currentUser?.id) ? 'rgba(59, 130, 246, 0.1)' : 'rgba(0, 0, 0, 0.05)'
+                  }"
+                >
+                  {{ (message.userId === currentUser?.id || message.user_id === currentUser?.id) ? 'You' : getMessageUsername(message) }}
+                </p>
                 <div
                   style="border-radius: 8px; padding: 8px 12px;"
                   :style="{ 
@@ -183,7 +193,7 @@
                   <p style="font-size: 14px; margin: 0;">{{ message.content }}</p>
                 </div>
                 <p style="font-size: 12px; color: #6b7280; margin-top: 4px;">
-                  {{ formatTime(message.createdAt || message.timestamp) }}
+                  {{ formatTime(message.createdAt || message.timestamp || message.created_at) }}
                 </p>
               </div>
             </div>
@@ -256,14 +266,29 @@ const newMessage = ref('')
 const loading = ref(false)
 const messagesLoading = ref(false)
 const showParticipants = ref(false)
+const messagesContainer = ref(null)
 
 // Load rooms on mount
 onMounted(() => {
+  console.log('Current user data:', currentUser.value)
   loadRooms()
 })
 
 // Cleanup on unmount
-onUnmounted(() => {
+onUnmounted(async () => {
+  // Leave the current room if any
+  if (selectedRoom.value?.id) {
+    try {
+      await $fetch(`/api/v1/chat/rooms/${selectedRoom.value.id}/leave`, {
+        baseURL: config.public.apiBaseUrl,
+        method: 'POST',
+        headers: getAuthHeaders()
+      })
+    } catch (error) {
+      console.error('Failed to leave room:', error)
+    }
+  }
+  
   disconnectWebSocket()
 })
 
@@ -292,6 +317,13 @@ const selectRoom = async (room) => {
   clearWebSocketMessages()
   
   selectedRoom.value = room
+  
+  // Automatically join the room
+  await joinRoom(room.id)
+  
+  // Load room details with updated participant count
+  await loadRoomDetails(room.id)
+  
   await loadMessages(room.id)
   
   // Connect to WebSocket for real-time messages
@@ -308,11 +340,59 @@ const loadMessages = async (roomId) => {
       baseURL: config.public.apiBaseUrl,
       headers: getAuthHeaders()
     })
+    console.log('API messages loaded:', response.messages)
+    
+    // Debug: Log first message to see user data
+    if (response.messages && response.messages.length > 0) {
+      console.log('First API message:', response.messages[0])
+      console.log('First message user:', response.messages[0].user)
+    }
+    
     messages.value = response.messages || []
+    
+    // Auto-scroll to bottom after loading messages
+    scrollToBottom()
   } catch (error) {
     console.error('Failed to load messages:', error)
   } finally {
     messagesLoading.value = false
+  }
+}
+
+// Join a room
+const joinRoom = async (roomId) => {
+  if (!roomId) return
+  
+  try {
+    await $fetch(`/api/v1/chat/rooms/${roomId}/join`, {
+      baseURL: config.public.apiBaseUrl,
+      method: 'POST',
+      headers: getAuthHeaders()
+    })
+    console.log('Joined room:', roomId)
+  } catch (error) {
+    console.error('Failed to join room:', error)
+  }
+}
+
+// Load room details with participant count
+const loadRoomDetails = async (roomId) => {
+  if (!roomId) return
+  
+  try {
+    const response = await $fetch(`/api/v1/chat/rooms/${roomId}`, {
+      baseURL: config.public.apiBaseUrl,
+      headers: getAuthHeaders()
+    })
+    
+    // Update the selected room with fresh data
+    if (response.room) {
+      selectedRoom.value = response.room
+      console.log('Room details loaded:', response.room)
+      console.log('Participant count:', response.room.participants?.length || 0)
+    }
+  } catch (error) {
+    console.error('Failed to load room details:', error)
   }
 }
 
@@ -333,6 +413,9 @@ const sendMessage = async () => {
         content: message
       }
     })
+    
+    // Auto-scroll to bottom after sending message
+    scrollToBottom()
   } catch (error) {
     console.error('Failed to save message to database:', error)
   }
@@ -345,17 +428,137 @@ const allMessages = computed(() => {
   
   // Combine and sort by timestamp
   const combined = [...apiMessages, ...wsMessagesList]
-  return combined.sort((a, b) => new Date(a.timestamp || a.created_at).getTime() - new Date(b.timestamp || b.created_at).getTime())
+  return combined.sort((a, b) => {
+    const timeA = a.timestamp || a.created_at || a.createdAt
+    const timeB = b.timestamp || b.created_at || b.createdAt
+    
+    const dateA = new Date(timeA)
+    const dateB = new Date(timeB)
+    
+    // Handle invalid dates by putting them at the end
+    if (isNaN(dateA.getTime()) && isNaN(dateB.getTime())) return 0
+    if (isNaN(dateA.getTime())) return 1
+    if (isNaN(dateB.getTime())) return -1
+    
+    return dateA.getTime() - dateB.getTime()
+  })
 })
 
+// Auto-scroll to bottom of messages
+const scrollToBottom = () => {
+  if (messagesContainer.value) {
+    nextTick(() => {
+      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+    })
+  }
+}
 
+// Watch for WebSocket messages to update participant count and auto-scroll
+watch(wsMessages, (newMessages) => {
+  if (newMessages && newMessages.length > 0) {
+    const latestMessage = newMessages[newMessages.length - 1]
+    
+    // Debug: Log message data to see username
+    console.log('Latest WebSocket message:', latestMessage)
+    console.log('Message username:', latestMessage.username)
+    console.log('Message user:', latestMessage.user)
+    
+    // Handle participant count updates
+    if (latestMessage.participant_count !== undefined && selectedRoom.value?.id === latestMessage.room_id) {
+      // Update the participant count
+      selectedRoom.value.participants = Array(latestMessage.participant_count).fill({})
+    }
+    
+    // Handle dedicated participant count messages
+    if (latestMessage.type === 'participant_count' && selectedRoom.value?.id === latestMessage.room_id) {
+      selectedRoom.value.participants = Array(latestMessage.participant_count).fill({})
+    }
+    
+    // Auto-scroll to bottom when new messages arrive
+    scrollToBottom()
+  }
+}, { deep: true })
+
+// Watch for changes in allMessages to auto-scroll
+watch(allMessages, () => {
+  scrollToBottom()
+}, { deep: true })
+
+
+
+// Get full username for message display
+const getMessageUsername = (message) => {
+  // Try different possible username sources
+  const username = message.user?.username || message.username || currentUser.value?.username || 'Unknown User'
+  
+  // Debug: Log the username resolution
+  console.log('Message username resolution:', {
+    messageUser: message.user?.username,
+    messageUsername: message.username,
+    currentUser: currentUser.value?.username,
+    final: username,
+    messageId: message.id,
+    messageType: message.type
+  })
+  
+  // Handle empty or invalid username
+  if (!username || username === '?' || username === '') {
+    return 'Unknown User'
+  }
+  
+  // Truncate very long usernames
+  if (username.length > 20) {
+    return username.substring(0, 17) + '...'
+  }
+  
+  return username
+}
+
+// Get user initial for message display
+const getMessageUserInitial = (message) => {
+  // Try different possible username sources
+  const username = message.user?.username || message.username || currentUser.value?.username || '?'
+  
+  // Debug: Log the username resolution
+  console.log('Message username resolution:', {
+    messageUser: message.user?.username,
+    messageUsername: message.username,
+    currentUser: currentUser.value?.username,
+    final: username,
+    messageId: message.id,
+    messageType: message.type
+  })
+  
+  // Handle empty or invalid username
+  if (!username || username === '?' || username === '') {
+    return '?'
+  }
+  
+  return username.charAt(0).toUpperCase()
+}
 
 // Format time
 const formatTime = (timestamp) => {
-  return new Date(timestamp).toLocaleTimeString([], { 
-    hour: '2-digit', 
-    minute: '2-digit' 
-  })
+  if (!timestamp) return 'Invalid Date'
+  
+  try {
+    // Handle both string timestamps and Date objects
+    const date = timestamp instanceof Date ? timestamp : new Date(timestamp)
+    
+    // Check if the date is valid
+    if (isNaN(date.getTime())) {
+      console.warn('Invalid timestamp received:', timestamp, typeof timestamp)
+      return 'Invalid Date'
+    }
+    
+    return date.toLocaleTimeString([], { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    })
+  } catch (error) {
+    console.error('Error formatting timestamp:', error, timestamp)
+    return 'Invalid Date'
+  }
 }
 
 // Handle logout
