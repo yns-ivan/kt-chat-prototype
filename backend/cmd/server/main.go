@@ -95,6 +95,7 @@ func main() {
 			chatRoutes.POST("/rooms", chatService.CreateRoom)
 			chatRoutes.GET("/rooms/:roomID/messages", chatService.GetMessages)
 			chatRoutes.POST("/rooms/:roomID/messages", chatService.SendMessage)
+			chatRoutes.POST("/rooms/:roomID/search", chatService.SearchMessages)
 			chatRoutes.POST("/rooms/:roomID/join", chatService.JoinRoom)
 			chatRoutes.POST("/rooms/:roomID/leave", chatService.LeaveRoom)
 		}

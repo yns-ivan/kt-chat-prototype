@@ -118,16 +118,122 @@
           </div>
           <div class="flex items-center space-x-2">
             <UButton
+              icon="i-heroicons-magnifying-glass"
+              variant="ghost"
+              size="sm"
+              @click="showSearch = !showSearch"
+              title="Search messages"
+            />
+            <UButton
               icon="i-heroicons-users"
               variant="ghost"
               size="sm"
-              @click="showParticipants = true"
+              @click="toggleActiveUsers"
+              title="Active users"
             />
             <UButton
               icon="i-heroicons-cog-6-tooth"
               variant="ghost"
               size="sm"
             />
+          </div>
+        </div>
+        
+        <!-- Search Bar -->
+        <div v-if="showSearch" style="margin-top: 12px; padding: 12px; background: #f9fafb; border-radius: 8px;">
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <input
+              v-model="searchQuery"
+              placeholder="Search messages..."
+              style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;"
+              @keyup.enter="performSearch"
+            />
+            <button
+              @click="performSearch"
+              style="padding: 8px 12px; background: #3b82f6; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer;"
+            >
+              Search
+            </button>
+            <button
+              @click="clearSearch"
+              style="padding: 8px 12px; background: #6b7280; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer;"
+            >
+              Clear
+            </button>
+          </div>
+          
+          <!-- Search Filters -->
+          <div v-if="showSearch" style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
+            <input
+              v-model="searchFilters.startDate"
+              type="date"
+              placeholder="Start date"
+              style="padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;"
+            />
+            <input
+              v-model="searchFilters.endDate"
+              type="date"
+              placeholder="End date"
+              style="padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;"
+            />
+            <select
+              v-model="searchFilters.userId"
+              style="padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;"
+            >
+              <option value="">All users</option>
+              <option v-for="participant in selectedRoom.participants" :key="participant.user_id" :value="participant.user_id">
+                {{ participant.user?.username || 'Unknown User' }}
+              </option>
+            </select>
+          </div>
+        </div>
+        
+        <!-- Active Users Panel -->
+        <div v-if="showActiveUsers" style="position: absolute; top: 100%; right: 0; width: 280px; background: white; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); z-index: 50; margin-top: 4px;">
+          <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <h4 style="font-size: 14px; font-weight: 600; color: #111827;">Active Users</h4>
+              <button
+                @click="showActiveUsers = false"
+                style="background: none; border: none; color: #6b7280; cursor: pointer; font-size: 16px;"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+          
+          <div style="max-height: 300px; overflow-y: auto;">
+            <div v-if="activeUsersLoading" style="padding: 16px; text-align: center; color: #6b7280;">
+              <div style="display: inline-block; width: 16px; height: 16px; border: 2px solid #e5e7eb; border-top: 2px solid #3b82f6; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+              <span style="margin-left: 8px; font-size: 14px;">Loading users...</span>
+            </div>
+            
+            <div v-else-if="activeUsers.length === 0" style="padding: 16px; text-align: center; color: #6b7280; font-size: 14px;">
+              No active users
+            </div>
+            
+            <div v-else style="padding: 8px;">
+              <div
+                v-for="user in activeUsers"
+                :key="user.id"
+                style="display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 6px; transition: background-color 0.2s;"
+                :style="{ backgroundColor: user.id === currentUser?.id ? '#f0f9ff' : 'transparent' }"
+              >
+                <div style="width: 32px; height: 32px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 600;">
+                  {{ user.username?.charAt(0).toUpperCase() || '?' }}
+                </div>
+                <div style="flex: 1; min-width: 0;">
+                  <p style="font-size: 14px; font-weight: 500; color: #111827; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    {{ user.username }}
+                    <span v-if="user.id === currentUser?.id" style="color: #3b82f6; font-size: 12px; margin-left: 4px;">(You)</span>
+                  </p>
+                  <p style="font-size: 12px; color: #6b7280; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    {{ user.email }}
+                  </p>
+                </div>
+                <div style="width: 8px; height: 8px; background: #10b981; border-radius: 50%; flex-shrink: 0;"></div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -155,11 +261,64 @@
             <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin text-gray-400" />
           </div>
           
+          <div v-if="searchLoading" class="flex justify-center">
+            <div style="display: flex; align-items: center; gap: 8px; padding: 16px; color: #6b7280;">
+              <div style="width: 16px; height: 16px; border: 2px solid #e5e7eb; border-top: 2px solid #3b82f6; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+              <span style="font-size: 14px;">Searching messages...</span>
+            </div>
+          </div>
+          
           <div v-else-if="messages.length === 0" class="text-center text-gray-500 dark:text-gray-400">
             <p>No messages yet. Start the conversation!</p>
           </div>
 
           <div v-else style="display: flex; flex-direction: column; gap: 16px;">
+            <!-- Search Results -->
+            <div v-if="searchResults.length > 0" style="margin-bottom: 16px; padding: 12px; background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 8px;">
+              <h4 style="font-size: 14px; font-weight: 600; color: #0369a1; margin-bottom: 8px;">
+                Search Results ({{ searchResults.length }} messages)
+              </h4>
+              <div style="display: flex; flex-direction: column; gap: 12px;">
+                <div
+                  v-for="message in searchResults"
+                  :key="message.id || message.timestamp"
+                  style="display: flex; gap: 12px; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e5e7eb;"
+                  :style="{ flexDirection: (message.userId === currentUser?.id || message.user_id === currentUser?.id) ? 'row-reverse' : 'row' }"
+                >
+                  <div style="width: 24px; height: 24px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 10px;">
+                    {{ getMessageUserInitial(message) }}
+                  </div>
+                  <div
+                    style="max-width: 280px; display: flex; flex-direction: column;"
+                    :style="{ alignItems: (message.userId === currentUser?.id || message.user_id === currentUser?.id) ? 'flex-end' : 'flex-start' }"
+                  >
+                    <p 
+                      style="font-size: 10px; margin-bottom: 2px; font-weight: 600; text-transform: capitalize; padding: 1px 4px; border-radius: 3px; display: inline-block;"
+                      :style="{ 
+                        color: (message.userId === currentUser?.id || message.user_id === currentUser?.id) ? '#3b82f6' : '#374151',
+                        background: (message.userId === currentUser?.id || message.user_id === currentUser?.id) ? 'rgba(59, 130, 246, 0.1)' : 'rgba(0, 0, 0, 0.05)'
+                      }"
+                    >
+                      {{ (message.userId === currentUser?.id || message.user_id === currentUser?.id) ? 'You' : getMessageUsername(message) }}
+                    </p>
+                    <div
+                      style="border-radius: 6px; padding: 6px 10px; font-size: 13px;"
+                      :style="{ 
+                        backgroundColor: (message.userId === currentUser?.id || message.user_id === currentUser?.id) ? '#3b82f6' : '#f3f4f6',
+                        color: (message.userId === currentUser?.id || message.user_id === currentUser?.id) ? 'white' : '#111827'
+                      }"
+                    >
+                      <p style="margin: 0;" v-html="highlightSearchTerm(message.content, searchQuery)"></p>
+                    </div>
+                    <p style="font-size: 10px; color: #6b7280; margin-top: 2px;">
+                      {{ formatTime(message.createdAt || message.timestamp || message.created_at) }}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Regular Messages -->
             <div
               v-for="message in allMessages"
               :key="message.id || message.timestamp"
@@ -236,6 +395,13 @@
   </div>
 </template>
 
+<style scoped>
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+</style>
+
 <script setup>
 defineOptions({
   name: 'ChatPage'
@@ -265,8 +431,23 @@ const messages = ref([])
 const newMessage = ref('')
 const loading = ref(false)
 const messagesLoading = ref(false)
-const showParticipants = ref(false)
 const messagesContainer = ref(null)
+
+// Search state
+const showSearch = ref(false)
+const searchQuery = ref('')
+const searchResults = ref([])
+const searchLoading = ref(false)
+const searchFilters = ref({
+  startDate: '',
+  endDate: '',
+  userId: ''
+})
+
+// Active users state
+const showActiveUsers = ref(false)
+const activeUsers = ref([])
+const activeUsersLoading = ref(false)
 
 // Load rooms on mount
 onMounted(() => {
@@ -312,11 +493,19 @@ const loadRooms = async () => {
 
 // Select a room
 const selectRoom = async (room) => {
+  // Leave previous room if exists
+  if (selectedRoom.value?.id && selectedRoom.value.id !== room.id) {
+    await leaveRoom(selectedRoom.value.id)
+  }
+  
   // Disconnect from previous room
   disconnectWebSocket()
   clearWebSocketMessages()
   
   selectedRoom.value = room
+  
+  // Clear search results when switching rooms
+  clearSearch()
   
   // Automatically join the room
   await joinRoom(room.id)
@@ -359,6 +548,22 @@ const loadMessages = async (roomId) => {
   }
 }
 
+// Leave a room
+const leaveRoom = async (roomId) => {
+  if (!roomId) return
+  
+  try {
+    await $fetch(`/api/v1/chat/rooms/${roomId}/leave`, {
+      baseURL: config.public.apiBaseUrl,
+      method: 'POST',
+      headers: getAuthHeaders()
+    })
+    console.log('Left room:', roomId)
+  } catch (error) {
+    console.error('Failed to leave room:', error)
+  }
+}
+
 // Join a room
 const joinRoom = async (roomId) => {
   if (!roomId) return
@@ -390,10 +595,98 @@ const loadRoomDetails = async (roomId) => {
       selectedRoom.value = response.room
       console.log('Room details loaded:', response.room)
       console.log('Participant count:', response.room.participants?.length || 0)
+      
+      // Update active users if the panel is open
+      if (showActiveUsers.value) {
+        await loadActiveUsers()
+      }
     }
   } catch (error) {
     console.error('Failed to load room details:', error)
   }
+}
+
+// Perform search
+const performSearch = async () => {
+  if (!searchQuery.value.trim() || !selectedRoom.value) return
+  
+  searchLoading.value = true
+  try {
+    const response = await $fetch(`/api/v1/chat/rooms/${selectedRoom.value.id}/search`, {
+      baseURL: config.public.apiBaseUrl,
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: {
+        query: searchQuery.value.trim(),
+        limit: 50,
+        offset: 0,
+        start_date: searchFilters.value.startDate,
+        end_date: searchFilters.value.endDate,
+        user_id: searchFilters.value.userId
+      }
+    })
+    
+    searchResults.value = response.messages || []
+    console.log('Search results:', searchResults.value)
+  } catch (error) {
+    console.error('Failed to search messages:', error)
+    searchResults.value = []
+  } finally {
+    searchLoading.value = false
+  }
+}
+
+// Highlight search terms in text
+const highlightSearchTerm = (text, searchTerm) => {
+  if (!searchTerm || !text) return text
+  
+  const regex = new RegExp(`(${searchTerm})`, 'gi')
+  return text.replace(regex, '<mark style="background-color: #fef08a; padding: 1px 2px; border-radius: 2px;">$1</mark>')
+}
+
+// Load active users for current room
+const loadActiveUsers = async () => {
+  if (!selectedRoom.value?.id) return
+  
+  activeUsersLoading.value = true
+  try {
+    const response = await $fetch(`/api/v1/chat/rooms/${selectedRoom.value.id}`, {
+      baseURL: config.public.apiBaseUrl,
+      headers: getAuthHeaders()
+    })
+    
+    if (response.room?.participants) {
+      activeUsers.value = response.room.participants
+        .filter(participant => participant.left_at === null)
+        .map(participant => participant.user)
+        .filter(user => user !== null)
+    }
+  } catch (error) {
+    console.error('Failed to load active users:', error)
+    activeUsers.value = []
+  } finally {
+    activeUsersLoading.value = false
+  }
+}
+
+// Toggle active users panel
+const toggleActiveUsers = async () => {
+  showActiveUsers.value = !showActiveUsers.value
+  if (showActiveUsers.value) {
+    await loadActiveUsers()
+  }
+}
+
+// Clear search
+const clearSearch = () => {
+  searchQuery.value = ''
+  searchResults.value = []
+  searchFilters.value = {
+    startDate: '',
+    endDate: '',
+    userId: ''
+  }
+  showSearch.value = false
 }
 
 // Send a message
@@ -467,11 +760,21 @@ watch(wsMessages, (newMessages) => {
     if (latestMessage.participant_count !== undefined && selectedRoom.value?.id === latestMessage.room_id) {
       // Update the participant count
       selectedRoom.value.participants = Array(latestMessage.participant_count).fill({})
+      
+      // Refresh active users if panel is open
+      if (showActiveUsers.value) {
+        loadActiveUsers()
+      }
     }
     
     // Handle dedicated participant count messages
     if (latestMessage.type === 'participant_count' && selectedRoom.value?.id === latestMessage.room_id) {
       selectedRoom.value.participants = Array(latestMessage.participant_count).fill({})
+      
+      // Refresh active users if panel is open
+      if (showActiveUsers.value) {
+        loadActiveUsers()
+      }
     }
     
     // Auto-scroll to bottom when new messages arrive

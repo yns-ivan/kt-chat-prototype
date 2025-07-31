@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -62,6 +63,16 @@ type CreateRoomRequest struct {
 // MessageRequest represents a message request
 type MessageRequest struct {
 	Content string `json:"content" binding:"required"`
+}
+
+// SearchRequest represents a search request
+type SearchRequest struct {
+	Query     string `json:"query" binding:"required"`
+	Limit     int    `json:"limit"`
+	Offset    int    `json:"offset"`
+	StartDate string `json:"start_date"`
+	EndDate   string `json:"end_date"`
+	UserID    string `json:"user_id"`
 }
 
 // Login handles user authentication with AWS Cognito
@@ -383,6 +394,104 @@ func (s *Service) GetMessages(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"messages": messages})
+}
+
+// SearchMessages searches messages in a specific room
+func (s *Service) SearchMessages(c *gin.Context) {
+	roomID := c.Param("roomID")
+	if roomID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Room ID is required"})
+		return
+	}
+
+	var req SearchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Set default values
+	if req.Limit <= 0 {
+		req.Limit = 50
+	}
+	if req.Offset < 0 {
+		req.Offset = 0
+	}
+
+	// Build query
+	query := s.db.Model(&models.Message{}).
+		Preload("User").
+		Preload("Files").
+		Where("room_id = ?", roomID)
+
+	// Add date range filter if provided
+	if req.StartDate != "" {
+		startDate, err := time.Parse("2006-01-02", req.StartDate)
+		if err == nil {
+			query = query.Where("created_at >= ?", startDate)
+		}
+	}
+	if req.EndDate != "" {
+		endDate, err := time.Parse("2006-01-02", req.EndDate)
+		if err == nil {
+			// Add one day to include the end date
+			endDate = endDate.Add(24 * time.Hour)
+			query = query.Where("created_at < ?", endDate)
+		}
+	}
+
+	// Add user filter if provided
+	if req.UserID != "" {
+		query = query.Where("user_id = ?", req.UserID)
+	}
+
+	// Get total count for pagination
+	var totalCount int64
+	countQuery := query
+	if err := countQuery.Count(&totalCount).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count messages"})
+		return
+	}
+
+	// Search in decrypted content
+	var messages []models.Message
+	if err := query.Order("created_at desc").Limit(req.Limit).Offset(req.Offset).Find(&messages).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch messages"})
+		return
+	}
+
+	// Decrypt and search in content
+	var searchResults []models.Message
+	for _, message := range messages {
+		// Decrypt message content
+		decryptedContent := message.Content
+		if message.Encrypted {
+			decrypted, err := encryption.Decrypt(message.Content, s.cfg.Encryption.Key)
+			if err == nil {
+				decryptedContent = decrypted
+			}
+		}
+
+		// Check if query matches decrypted content (case-insensitive)
+		if strings.Contains(strings.ToLower(decryptedContent), strings.ToLower(req.Query)) {
+			// Update the message content with decrypted version
+			message.Content = decryptedContent
+			searchResults = append(searchResults, message)
+		}
+	}
+
+	// Sort results by creation date (newest first)
+	sort.Slice(searchResults, func(i, j int) bool {
+		return searchResults[i].CreatedAt.After(searchResults[j].CreatedAt)
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"messages": searchResults,
+		"total":    totalCount,
+		"limit":    req.Limit,
+		"offset":   req.Offset,
+		"query":    req.Query,
+	})
 }
 
 // JoinRoom adds a user to a chat room
