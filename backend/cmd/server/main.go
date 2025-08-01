@@ -30,6 +30,13 @@ func main() {
 		log.Fatal("Failed to connect to database:", err)
 	}
 
+	// Ensure uploads directory exists
+	if err := os.MkdirAll(cfg.FileUpload.UploadPath, 0755); err != nil {
+		log.Printf("Warning: Failed to create uploads directory: %v", err)
+	} else {
+		log.Printf("Uploads directory ready: %s", cfg.FileUpload.UploadPath)
+	}
+
 	// Initialize Cognito service
 	var cognitoAuth *auth.CognitoService
 	if cfg.AWSCognito.UserPoolID != "" && cfg.AWSCognito.ClientID != "" {
@@ -51,6 +58,10 @@ func main() {
 	// Initialize chat service
 	chatService := chat.NewService(db, hub, cognitoAuth)
 
+	// Start periodic cleanup for stale participants
+	chatService.StartPeriodicCleanup()
+	log.Println("Periodic cleanup started")
+
 	// Set Gin mode
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -62,6 +73,9 @@ func main() {
 	// Add middleware
 	r.Use(middleware.CORS())
 	r.Use(middleware.Logger())
+
+	// Serve uploaded files
+	r.Static("/uploads", "./uploads")
 
 	// Health check endpoint
 	r.GET("/health", func(c *gin.Context) {
@@ -98,6 +112,9 @@ func main() {
 			chatRoutes.POST("/rooms/:roomID/search", chatService.SearchMessages)
 			chatRoutes.POST("/rooms/:roomID/join", chatService.JoinRoom)
 			chatRoutes.POST("/rooms/:roomID/leave", chatService.LeaveRoom)
+			chatRoutes.POST("/rooms/:roomID/upload", chatService.UploadFile)
+			chatRoutes.GET("/files/:fileID", chatService.DownloadFile)
+			chatRoutes.GET("/files/:fileID/preview", chatService.PreviewFile)
 		}
 
 		// WebSocket endpoint

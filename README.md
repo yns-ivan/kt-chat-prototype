@@ -29,6 +29,7 @@ chat-prototype/
 ### Core Functionality
 - **Real-time Chat**: WebSocket-based messaging with room support
 - **File Upload**: Images, PDFs, and videos with preview capabilities
+- **File Storage**: Local filesystem or AWS S3 storage options
 - **Message Encryption**: AES-256-GCM encryption for secure messaging
 - **User Authentication**: AWS Cognito integration with JWT tokens
 - **Searchable Messages**: Encrypted message search functionality
@@ -72,6 +73,7 @@ chat-prototype/
 
 ### AWS Services
 - AWS Cognito User Pool
+- AWS S3 Bucket (for file storage)
 - EC2 Instance (already provisioned: DEV-KTCHAT-WEB01)
 
 ## 🚀 Quick Start
@@ -84,12 +86,15 @@ chat-prototype/
    cd chat-prototype
    ```
 
-2. **Configure AWS Cognito (Optional)**
+2. **Configure AWS Services (Optional)**
    ```bash
    # Follow the setup guide for AWS Cognito
    # docs/AWS_COGNITO_SETUP.md
    
-   # Or use mock authentication for development
+   # Follow the setup guide for S3 file storage
+   # docs/S3_SETUP.md
+   
+   # Or use mock authentication and local storage for development
    # (No configuration needed)
    ```
 

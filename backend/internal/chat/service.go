@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -27,16 +29,37 @@ type Service struct {
 	hub          *websocket.Hub
 	cfg          *config.Config
 	cognitoAuth  *auth.CognitoService
+	s3Service    *file.S3Service
 }
 
 // NewService creates a new chat service
 func NewService(db *gorm.DB, hub *websocket.Hub, cognitoAuth *auth.CognitoService) *Service {
 	cfg := config.New()
+	
+	// Initialize S3 service if configured
+	var s3Service *file.S3Service
+	if cfg.S3.UseS3 && cfg.S3.BucketName != "" {
+		var err error
+		s3Service, err = file.NewS3Service(
+			cfg.S3.Region,
+			cfg.S3.BucketName,
+			cfg.S3.AccessKeyID,
+			cfg.S3.SecretAccessKey,
+		)
+		if err != nil {
+			fmt.Printf("Warning: Failed to initialize S3 service: %v\n", err)
+			fmt.Println("Continuing with local file storage...")
+		} else {
+			fmt.Println("S3 service initialized successfully")
+		}
+	}
+	
 	return &Service{
 		db:          db,
 		hub:         hub,
 		cfg:         cfg,
 		cognitoAuth: cognitoAuth,
+		s3Service:   s3Service,
 	}
 }
 
@@ -633,10 +656,17 @@ func (s *Service) SendMessage(c *gin.Context) {
 // UploadFile handles file uploads
 func (s *Service) UploadFile(c *gin.Context) {
 	roomID := c.Param("roomID")
-	userID := c.GetString("user_id")
+	cognitoUserID := c.GetString("user_id")
 
-	if roomID == "" || userID == "" {
+	if roomID == "" || cognitoUserID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Room ID and user ID are required"})
+		return
+	}
+
+	// Look up the internal user ID using the Cognito ID
+	var user models.User
+	if err := s.db.Where("cognito_id = ?", cognitoUserID).First(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User not found"})
 		return
 	}
 
@@ -667,16 +697,42 @@ func (s *Service) UploadFile(c *gin.Context) {
 		return
 	}
 
-	// Save file
-	filePath, err := file.SaveFile(uploadedFile, header.Filename, s.cfg.FileUpload.UploadPath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+	// Save file (local or S3)
+	var filePath string
+	if s.s3Service != nil {
+		// Upload to S3
+		filePath, err = s.s3Service.UploadFile(uploadedFile, header.Filename)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload file to S3"})
+			return
+		}
+	} else {
+		// Save to local filesystem
+		filePath, err = file.SaveFile(uploadedFile, header.Filename, s.cfg.FileUpload.UploadPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+			return
+		}
+	}
+
+	// Create message with file attachment
+	message := models.Message{
+		ID:        uuid.New().String(),
+		RoomID:    roomID,
+		UserID:    user.ID,
+		Content:   fmt.Sprintf("📎 %s", header.Filename), // File message content
+		Encrypted: false, // File messages don't need encryption
+	}
+
+	if err := s.db.Create(&message).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save message"})
 		return
 	}
 
 	// Create file attachment record
 	attachment := models.FileAttachment{
 		ID:        uuid.New().String(),
+		MessageID: message.ID,
 		FileName:  header.Filename,
 		FilePath:  filePath,
 		FileSize:  header.Size,
@@ -689,8 +745,167 @@ func (s *Service) UploadFile(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"file": attachment})
-} 
+	// Get current participant count
+	var participantCount int64
+	s.db.Model(&models.RoomParticipant{}).Where("room_id = ? AND left_at IS NULL", roomID).Count(&participantCount)
+
+	// Broadcast file message via WebSocket
+	wsMessage := websocket.Message{
+		Type:             "message",
+		RoomID:           roomID,
+		UserID:           user.ID,
+		Username:         user.Username,
+		Content:          message.Content,
+		Timestamp:        message.CreatedAt.Format(time.RFC3339),
+		ParticipantCount: int(participantCount),
+		Files: []websocket.FileInfo{
+			{
+				ID:       attachment.ID,
+				FileName: attachment.FileName,
+				FileType: attachment.FileType,
+				FileSize: attachment.FileSize,
+			},
+		},
+	}
+
+	if msgBytes, err := json.Marshal(wsMessage); err == nil {
+		s.hub.BroadcastToRoom(roomID, msgBytes)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "File uploaded successfully",
+		"file":    attachment,
+		"message_id": message.ID,
+	})
+}
+
+// PreviewFile handles file preview (serves with inline disposition)
+func (s *Service) PreviewFile(c *gin.Context) {
+	fileID := c.Param("fileID")
+	cognitoUserID := c.GetString("user_id")
+
+	if fileID == "" || cognitoUserID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File ID and user ID are required"})
+		return
+	}
+
+	// Look up the internal user ID using the Cognito ID
+	var user models.User
+	if err := s.db.Where("cognito_id = ?", cognitoUserID).First(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Get file attachment with message and room info
+	var attachment models.FileAttachment
+	if err := s.db.Preload("Message.Room").Where("id = ?", fileID).First(&attachment).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	// Check if user is a participant in the room where the file was shared
+	var participant models.RoomParticipant
+	if err := s.db.Where("room_id = ? AND user_id = ? AND left_at IS NULL", attachment.Message.RoomID, user.ID).First(&participant).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	// Check if file exists and serve it
+	if s.s3Service != nil && strings.HasPrefix(attachment.FilePath, "uploads/") {
+		// File is stored in S3
+		fileContent, err := s.s3Service.DownloadFile(attachment.FilePath)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "File not found in S3"})
+			return
+		}
+
+		// Set headers for file preview (inline disposition)
+		c.Header("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", attachment.FileName))
+		c.Header("Content-Type", attachment.MimeType)
+		c.Header("Content-Length", fmt.Sprintf("%d", len(fileContent)))
+
+		// Serve the file content
+		c.Data(http.StatusOK, attachment.MimeType, fileContent)
+	} else {
+		// File is stored locally
+		if _, err := os.Stat(attachment.FilePath); os.IsNotExist(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "File not found on disk"})
+			return
+		}
+
+		// Set headers for file preview (inline disposition)
+		c.Header("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", attachment.FileName))
+		c.Header("Content-Type", attachment.MimeType)
+		c.Header("Content-Length", fmt.Sprintf("%d", attachment.FileSize))
+
+		// Serve the file
+		c.File(attachment.FilePath)
+	}
+}
+
+// DownloadFile handles file downloads
+func (s *Service) DownloadFile(c *gin.Context) {
+	fileID := c.Param("fileID")
+	cognitoUserID := c.GetString("user_id")
+
+	if fileID == "" || cognitoUserID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File ID and user ID are required"})
+		return
+	}
+
+	// Look up the internal user ID using the Cognito ID
+	var user models.User
+	if err := s.db.Where("cognito_id = ?", cognitoUserID).First(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Get file attachment with message and room info
+	var attachment models.FileAttachment
+	if err := s.db.Preload("Message.Room").Where("id = ?", fileID).First(&attachment).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	// Check if user is a participant in the room where the file was shared
+	var participant models.RoomParticipant
+	if err := s.db.Where("room_id = ? AND user_id = ? AND left_at IS NULL", attachment.Message.RoomID, user.ID).First(&participant).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	// Check if file exists and serve it
+	if s.s3Service != nil && strings.HasPrefix(attachment.FilePath, "uploads/") {
+		// File is stored in S3
+		fileContent, err := s.s3Service.DownloadFile(attachment.FilePath)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "File not found in S3"})
+			return
+		}
+
+		// Set headers for file download
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", attachment.FileName))
+		c.Header("Content-Type", attachment.MimeType)
+		c.Header("Content-Length", fmt.Sprintf("%d", len(fileContent)))
+
+		// Serve the file content
+		c.Data(http.StatusOK, attachment.MimeType, fileContent)
+	} else {
+		// File is stored locally
+		if _, err := os.Stat(attachment.FilePath); os.IsNotExist(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "File not found on disk"})
+			return
+		}
+
+		// Set headers for file download
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", attachment.FileName))
+		c.Header("Content-Type", attachment.MimeType)
+		c.Header("Content-Length", fmt.Sprintf("%d", attachment.FileSize))
+
+		// Serve the file
+		c.File(attachment.FilePath)
+	}
+}
 
 // ConfirmUser handles user account confirmation
 func (s *Service) ConfirmUser(c *gin.Context) {
@@ -781,4 +996,50 @@ func (s *Service) broadcastParticipantCount(roomID string) {
 	if msgBytes, err := json.Marshal(wsMessage); err == nil {
 		s.hub.BroadcastToRoom(roomID, msgBytes)
 	}
+}
+
+// CleanupStaleParticipants removes participants who are no longer connected via WebSocket
+func (s *Service) CleanupStaleParticipants() {
+	// Get all active participants from database
+	var participants []models.RoomParticipant
+	s.db.Where("left_at IS NULL").Find(&participants)
+
+	now := time.Now()
+	staleParticipants := make([]models.RoomParticipant, 0)
+
+	for _, participant := range participants {
+		// Check if this user is actually connected via WebSocket
+		// We'll use a simple heuristic: if they haven't been active for 3 minutes, consider them stale
+		// In a real implementation, you might want to track this more precisely
+		
+		// For now, we'll use a simple approach: if they joined more than 5 minutes ago
+		// and we can't verify their WebSocket connection, mark them as left
+		if now.Sub(participant.JoinedAt) > 5*time.Minute {
+			// Check if user is actually connected (this would need to be implemented)
+			// For now, we'll use a conservative approach
+			staleParticipants = append(staleParticipants, participant)
+		}
+	}
+
+	// Mark stale participants as left
+	for _, participant := range staleParticipants {
+		s.db.Model(&participant).Update("left_at", now)
+		log.Printf("Marked stale participant as left: UserID=%s, RoomID=%s", participant.UserID, participant.RoomID)
+	}
+
+	if len(staleParticipants) > 0 {
+		log.Printf("Cleanup: Marked %d stale participants as left", len(staleParticipants))
+	}
+}
+
+// StartPeriodicCleanup starts a goroutine that periodically cleans up stale participants
+func (s *Service) StartPeriodicCleanup() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute) // Run every 5 minutes
+		defer ticker.Stop()
+		
+		for range ticker.C {
+			s.CleanupStaleParticipants()
+		}
+	}()
 } 

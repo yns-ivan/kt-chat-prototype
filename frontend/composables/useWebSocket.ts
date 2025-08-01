@@ -8,7 +8,14 @@ interface ChatMessage {
   created_at?: string
   createdAt?: string
   participant_count?: number
-  files?: unknown[]
+  files?: FileInfo[]
+}
+
+interface FileInfo {
+  id: string
+  file_name: string
+  file_type: string
+  file_size: number
 }
 
 export const useWebSocket = () => {

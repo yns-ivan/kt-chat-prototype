@@ -42,6 +42,10 @@ COGNITO_CLIENT_SECRET=your-client-secret
 # AWS Credentials (for local development)
 AWS_ACCESS_KEY_ID=your-access-key
 AWS_SECRET_ACCESS_KEY=your-secret-key
+
+# S3 Configuration (Optional - for file storage)
+S3_BUCKET_NAME=your-s3-bucket-name
+STORAGE_TYPE=local  # "local" or "s3"
 ```
 
 ### 3. Start the Development Environment
@@ -63,7 +67,46 @@ docker compose exec postgres psql -U ktchat -d ktchat -c "\dt"
 
 # Test AWS Cognito integration (if configured)
 ./scripts/test-cognito.sh
+
+# Test S3 integration (if configured)
+./scripts/setup-s3.sh
 ```
+
+## 📁 S3 File Storage Setup (Optional)
+
+### Quick S3 Setup
+```bash
+# Run the automated S3 setup script
+./scripts/setup-s3.sh
+```
+
+### Manual S3 Setup
+1. **Create S3 Bucket**
+   ```bash
+   aws s3 mb s3://your-bucket-name --region ap-northeast-1
+   ```
+
+2. **Configure Bucket for Private Access**
+   ```bash
+   aws s3api put-public-access-block \
+       --bucket your-bucket-name \
+       --public-access-block-configuration \
+       BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+   ```
+
+3. **Create IAM Policy**
+   - Go to AWS IAM Console
+   - Create policy with S3 permissions
+   - Attach to your EC2 instance role or create IAM user
+
+4. **Update Environment Variables**
+   ```bash
+   # Add to your .env file
+   STORAGE_TYPE=s3
+   S3_BUCKET_NAME=your-bucket-name
+   ```
+
+For detailed S3 setup instructions, see [S3_SETUP.md](S3_SETUP.md).
 
 ## 🔧 Manual Setup (Alternative)
 

@@ -29,6 +29,10 @@ type Hub struct {
 
 	// Mutex for thread safety
 	mutex sync.RWMutex
+
+	// Cleanup control
+	cleanupTicker *time.Ticker
+	stopCleanup   chan bool
 }
 
 // Client represents a connected WebSocket client
@@ -45,6 +49,10 @@ type Client struct {
 	userID   string
 	username string
 	roomID   string
+
+	// Connection tracking
+	lastActivity time.Time
+	lastPing     time.Time
 }
 
 // Message represents a chat message
@@ -70,21 +78,30 @@ type FileInfo struct {
 // NewHub creates a new Hub instance
 func NewHub() *Hub {
 	return &Hub{
-		clients:    make(map[*Client]bool),
-		broadcast:  make(chan []byte),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		rooms:      make(map[string]map[*Client]bool),
+		clients:       make(map[*Client]bool),
+		broadcast:     make(chan []byte),
+		register:      make(chan *Client),
+		unregister:    make(chan *Client),
+		rooms:         make(map[string]map[*Client]bool),
+		cleanupTicker: time.NewTicker(30 * time.Second), // Run cleanup every 30 seconds
+		stopCleanup:   make(chan bool),
 	}
 }
 
 // Run starts the hub
 func (h *Hub) Run() {
+	// Start cleanup goroutine
+	go h.cleanupRoutine()
+
 	for {
 		select {
 		case client := <-h.register:
 			h.mutex.Lock()
 			h.clients[client] = true
+			
+			// Initialize client activity tracking
+			client.lastActivity = time.Now()
+			client.lastPing = time.Now()
 			
 			// Add client to room
 			if client.roomID != "" {
@@ -126,6 +143,10 @@ func (h *Hub) Run() {
 				}
 			}
 			h.mutex.RUnlock()
+
+		case <-h.stopCleanup:
+			h.cleanupTicker.Stop()
+			return
 		}
 	}
 }
@@ -209,6 +230,7 @@ func (c *Client) readPump() {
 	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		c.lastPing = time.Now() // Update ping time on pong
 		return nil
 	})
 
@@ -220,6 +242,9 @@ func (c *Client) readPump() {
 			}
 			break
 		}
+
+		// Update last activity time
+		c.lastActivity = time.Now()
 
 		// Parse message
 		var msg Message
@@ -271,11 +296,66 @@ func (c *Client) writePump() {
 			if err := w.Close(); err != nil {
 				return
 			}
+			
+			// Update last activity time when sending messages
+			c.lastActivity = time.Now()
+			
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := c.conn.WriteMessage(websocket.PongMessage, nil); err != nil {
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+			
+			// Check if client is responding to pings
+			if time.Since(c.lastPing) > 2*time.Minute {
+				log.Printf("Client %s not responding to pings, closing connection", c.username)
 				return
 			}
 		}
 	}
+}
+
+// cleanupRoutine runs periodically to clean up stale connections
+func (h *Hub) cleanupRoutine() {
+	for range h.cleanupTicker.C {
+		h.mutex.Lock()
+		now := time.Now()
+		staleClients := make([]*Client, 0)
+
+		// Check for stale clients (no activity for 2 minutes)
+		for client := range h.clients {
+			// Check if client has been inactive for too long
+			if now.Sub(client.lastActivity) > 2*time.Minute {
+				staleClients = append(staleClients, client)
+				log.Printf("Detected stale client: %s (inactive for %v)", client.username, now.Sub(client.lastActivity))
+			}
+		}
+
+		// Remove stale clients
+		for _, client := range staleClients {
+			delete(h.clients, client)
+			close(client.send)
+			
+			// Remove from room
+			if client.roomID != "" && h.rooms[client.roomID] != nil {
+				delete(h.rooms[client.roomID], client)
+				if len(h.rooms[client.roomID]) == 0 {
+					delete(h.rooms, client.roomID)
+				}
+			}
+			
+			log.Printf("Removed stale client: %s from room: %s", client.username, client.roomID)
+		}
+		h.mutex.Unlock()
+
+		// Log cleanup statistics
+		if len(staleClients) > 0 {
+			log.Printf("Cleanup: Removed %d stale clients", len(staleClients))
+		}
+	}
+}
+
+// StopCleanup stops the cleanup routine
+func (h *Hub) StopCleanup() {
+	h.stopCleanup <- true
 } 

@@ -350,6 +350,45 @@
                   }"
                 >
                   <p style="font-size: 14px; margin: 0;">{{ message.content }}</p>
+                  
+                  <!-- File Attachments -->
+                  <div v-if="message.files && message.files.length > 0" style="margin-top: 8px;">
+                    <div 
+                      v-for="file in message.files" 
+                      :key="file.id"
+                      style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: rgba(255, 255, 255, 0.1); border-radius: 4px; margin-bottom: 4px;"
+                    >
+                      <span style="font-size: 16px;">
+                        {{ getFileIcon(file.file_type) }}
+                      </span>
+                      <div style="flex: 1; min-width: 0;">
+                        <p style="font-size: 12px; margin: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                          {{ file.file_name }}
+                        </p>
+                        <p style="font-size: 10px; margin: 0; opacity: 0.8;">
+                          {{ formatFileSize(file.file_size) }}
+                        </p>
+                      </div>
+                      
+                      <!-- Preview Button for Images and PDFs -->
+                      <button 
+                        v-if="file.file_type === 'image' || file.file_type === 'pdf'"
+                        @click="previewFile(file)"
+                        style="background: none; border: none; color: inherit; cursor: pointer; padding: 2px; font-size: 12px; opacity: 0.8; transition: opacity 0.2s; margin-right: 4px;"
+                        title="Preview file"
+                      >
+                        👁️
+                      </button>
+                      
+                      <button 
+                        @click="downloadFile(file.id)"
+                        style="background: none; border: none; color: inherit; cursor: pointer; padding: 2px; font-size: 12px; opacity: 0.8; transition: opacity 0.2s;"
+                        title="Download file"
+                      >
+                        ⬇️
+                      </button>
+                    </div>
+                  </div>
                 </div>
                 <p style="font-size: 12px; color: #6b7280; margin-top: 4px;">
                   {{ formatTime(message.createdAt || message.timestamp || message.created_at) }}
@@ -373,6 +412,23 @@
           </div>
           
           <form @submit.prevent="sendMessage" style="display: flex; gap: 8px;">
+            <!-- File Upload Button -->
+            <label 
+              for="file-upload"
+              style="padding: 8px 12px; background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; cursor: pointer; transition: background-color 0.2s; display: flex; align-items: center; gap: 4px;"
+              :class="{ 'bg-blue-50 border-blue-300': selectedFiles.length > 0 }"
+            >
+              📎
+              <input
+                id="file-upload"
+                type="file"
+                multiple
+                @change="handleFileSelect"
+                style="display: none;"
+                accept=".jpg,.jpeg,.png,.gif,.pdf,.mp4,.avi,.mov,.doc,.docx,.txt"
+              />
+            </label>
+            
             <input
               v-model="newMessage"
               placeholder="Type your message..."
@@ -381,17 +437,101 @@
             />
             <button
               type="submit"
-              :disabled="!newMessage.trim() || !isConnected"
+              :disabled="(!newMessage.trim() && selectedFiles.length === 0) || !isConnected"
               style="padding: 8px 12px; background: #3b82f6; color: white; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; transition: background-color 0.2s;"
             >
               📤
             </button>
           </form>
+          
+          <!-- File Preview Area -->
+          <div v-if="selectedFiles.length > 0" style="margin-top: 8px; padding: 8px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;">
+            <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">Selected files:</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+              <div 
+                v-for="(file, index) in selectedFiles" 
+                :key="index"
+                style="display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: white; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;"
+              >
+                <span style="color: #6b7280;">📎</span>
+                <span style="color: #111827; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                  {{ file.name }}
+                </span>
+                <button 
+                  @click="removeFile(index)"
+                  style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 12px; padding: 0; margin-left: 4px;"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
 
-
+    <!-- File Preview Modal -->
+    <div 
+      v-if="previewModal.show" 
+      style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.8); display: flex; align-items: center; justify-content: center; z-index: 1000;"
+      @click="closePreview"
+    >
+      <div 
+        style="width: 95vw; height: 95vh; background: white; border-radius: 8px; overflow: hidden; position: relative;"
+        @click.stop
+      >
+        <!-- Modal Header -->
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; background: #f9fafb;">
+          <div style="flex: 1; min-width: 0;">
+            <h3 style="font-size: 16px; font-weight: 600; color: #111827; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              {{ previewModal.file?.file_name }}
+            </h3>
+            <p style="font-size: 12px; color: #6b7280; margin: 4px 0 0 0;">
+              {{ formatFileSize(previewModal.file?.file_size) }}
+            </p>
+          </div>
+          <button 
+            @click="closePreview"
+            style="background: none; border: none; color: #6b7280; cursor: pointer; padding: 4px; font-size: 18px; margin-left: 8px;"
+          >
+            ✕
+          </button>
+        </div>
+        
+        <!-- Modal Content -->
+        <div style="padding: 16px; max-height: calc(95vh - 80px); overflow: auto;">
+          <!-- Image Preview -->
+          <div v-if="previewModal.file?.file_type === 'image'" style="text-align: center;">
+            <img 
+              :src="previewModal.url" 
+              :alt="previewModal.file?.file_name"
+              style="max-width: 100%; max-height: calc(95vh - 120px); object-fit: contain; border-radius: 4px;"
+            />
+          </div>
+          
+          <!-- PDF Preview -->
+          <div v-else-if="previewModal.file?.file_type === 'pdf'" style="width: 100%; height: calc(95vh - 120px);">
+            <object 
+              :data="previewModal.url"
+              type="application/pdf"
+              style="width: 100%; height: 100%; border: none; border-radius: 4px;"
+            >
+              <p>Your browser doesn't support PDF preview. <a :href="previewModal.url" target="_blank">Click here to view the PDF</a></p>
+            </object>
+          </div>
+        </div>
+        
+        <!-- Modal Footer -->
+        <div style="padding: 12px 16px; border-top: 1px solid #e5e7eb; background: #f9fafb; display: flex; justify-content: flex-end; gap: 8px;">
+          <button 
+            @click="downloadFile(previewModal.file?.id)"
+            style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer;"
+          >
+            Download
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -448,6 +588,16 @@ const searchFilters = ref({
 const showActiveUsers = ref(false)
 const activeUsers = ref([])
 const activeUsersLoading = ref(false)
+
+// File upload state
+const selectedFiles = ref([])
+
+// Preview modal state
+const previewModal = ref({
+  show: false,
+  file: null,
+  url: ''
+})
 
 // Load rooms on mount
 onMounted(() => {
@@ -691,27 +841,53 @@ const clearSearch = () => {
 
 // Send a message
 const sendMessage = async () => {
-  if (!newMessage.value.trim() || !selectedRoom.value) return
+  if (!newMessage.value.trim() && selectedFiles.value.length === 0 || !selectedRoom.value) return
   
   const message = newMessage.value.trim()
+  
+  // Handle file uploads first
+  if (selectedFiles.value.length > 0) {
+    for (const file of selectedFiles.value) {
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+        
+        await $fetch(`/api/v1/chat/rooms/${selectedRoom.value.id}/upload`, {
+          baseURL: config.public.apiBaseUrl,
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: formData
+        })
+      } catch (error) {
+        console.error('Failed to upload file:', error)
+      }
+    }
+    
+    // Clear selected files
+    selectedFiles.value = []
+  }
+  
+  // Send text message if any
+  if (message) {
+    try {
+      await $fetch(`/api/v1/chat/rooms/${selectedRoom.value.id}/messages`, {
+        baseURL: config.public.apiBaseUrl,
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: {
+          content: message
+        }
+      })
+    } catch (error) {
+      console.error('Failed to send message:', error)
+    }
+  }
+  
+  // Clear message input
   newMessage.value = ''
   
-  // Save to database via API (which also broadcasts via WebSocket)
-  try {
-    await $fetch(`/api/v1/chat/rooms/${selectedRoom.value.id}/messages`, {
-      baseURL: config.public.apiBaseUrl,
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: {
-        content: message
-      }
-    })
-    
-    // Auto-scroll to bottom after sending message
-    scrollToBottom()
-  } catch (error) {
-    console.error('Failed to save message to database:', error)
-  }
+  // Auto-scroll to bottom
+  scrollToBottom()
 }
 
 // Computed property to combine API messages with WebSocket messages
@@ -862,6 +1038,102 @@ const formatTime = (timestamp) => {
     console.error('Error formatting timestamp:', error, timestamp)
     return 'Invalid Date'
   }
+}
+
+// Handle file selection
+const handleFileSelect = (event) => {
+  selectedFiles.value = Array.from(event.target.files)
+}
+
+// Remove a selected file
+const removeFile = (index) => {
+  selectedFiles.value.splice(index, 1)
+}
+
+// Get file icon based on file type
+const getFileIcon = (fileType) => {
+  switch (fileType) {
+    case 'image': return '🖼️'
+    case 'pdf': return '📄'
+    case 'video': return '🎥'
+    case 'audio': return '🎵'
+    case 'document': return '📝'
+    default: return '📎'
+  }
+}
+
+// Format file size
+const formatFileSize = (bytes) => {
+  if (!bytes) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+}
+
+// Download file
+const downloadFile = async (fileId) => {
+  try {
+    const response = await $fetch(`/api/v1/chat/files/${fileId}`, {
+      baseURL: config.public.apiBaseUrl,
+      headers: getAuthHeaders(),
+      responseType: 'blob'
+    })
+    
+    // Create download link
+    const blob = new Blob([response])
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = '' // Browser will use the filename from Content-Disposition
+    document.body.appendChild(a)
+    a.click()
+    window.URL.revokeObjectURL(url)
+    document.body.removeChild(a)
+  } catch (error) {
+    console.error('Failed to download file:', error)
+  }
+}
+
+// Preview file
+const previewFile = async (file) => {
+  try {
+    // Get the file URL from the backend using the preview endpoint
+    const response = await $fetch(`/api/v1/chat/files/${file.id}/preview`, {
+      baseURL: config.public.apiBaseUrl,
+      headers: getAuthHeaders(),
+      responseType: 'blob'
+    })
+    
+    // Create object URL for preview with correct MIME type
+    let mimeType = 'application/octet-stream'
+    if (file.file_type === 'pdf') {
+      mimeType = 'application/pdf'
+    } else if (file.file_type === 'image') {
+      mimeType = 'image/jpeg' // Default to jpeg, could be enhanced to detect actual type
+    }
+    
+    const blob = new Blob([response], { type: mimeType })
+    const url = window.URL.createObjectURL(blob)
+    
+    previewModal.value.show = true
+    previewModal.value.file = file
+    previewModal.value.url = url
+  } catch (error) {
+    console.error('Failed to load file for preview:', error)
+  }
+}
+
+// Close preview modal
+const closePreview = () => {
+  // Clean up object URL to prevent memory leaks
+  if (previewModal.value.url && previewModal.value.url.startsWith('blob:')) {
+    window.URL.revokeObjectURL(previewModal.value.url)
+  }
+  
+  previewModal.value.show = false
+  previewModal.value.file = null
+  previewModal.value.url = ''
 }
 
 // Handle logout
