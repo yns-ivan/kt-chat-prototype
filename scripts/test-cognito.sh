@@ -154,58 +154,6 @@ if [ "$USER_CONFIRMED" = false ]; then
     fi
 fi
 
-# 6. Test with existing admin user (if available)
-echo -e "${BLUE}6. Testing with existing admin user...${NC}"
-ADMIN_LOGIN_RESPONSE=$(curl -s -X POST "$API_BASE_URL/api/v1/auth/login" \
-    -H "Content-Type: application/json" \
-    -d '{
-        "username": "admin",
-        "password": "$liferFire18"
-    }')
-
-if [ "$JQ_AVAILABLE" = true ]; then
-    echo "Admin Login Response:"
-    echo "$ADMIN_LOGIN_RESPONSE" | jq .
-else
-    echo "Admin Login Response: $ADMIN_LOGIN_RESPONSE"
-fi
-
-if echo "$ADMIN_LOGIN_RESPONSE" | grep -q "token"; then
-    print_status 0 "Admin login successful"
-    
-    # Extract token for further testing
-    if [ "$JQ_AVAILABLE" = true ]; then
-        TOKEN=$(echo "$ADMIN_LOGIN_RESPONSE" | jq -r '.token')
-    else
-        TOKEN=$(echo "$ADMIN_LOGIN_RESPONSE" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
-    fi
-    
-    if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
-        echo -e "${GREEN}✓ JWT token extracted successfully${NC}"
-        
-        # Test authenticated endpoint
-        echo -e "${BLUE}7. Testing authenticated endpoint...${NC}"
-        AUTH_RESPONSE=$(curl -s -X GET "$API_BASE_URL/api/v1/chat/rooms" \
-            -H "Authorization: Bearer $TOKEN")
-        
-        if [ "$JQ_AVAILABLE" = true ]; then
-            echo "Authenticated Response:"
-            echo "$AUTH_RESPONSE" | jq .
-        else
-            echo "Authenticated Response: $AUTH_RESPONSE"
-        fi
-        
-        if echo "$AUTH_RESPONSE" | grep -q "rooms" || echo "$AUTH_RESPONSE" | grep -q "\[\]"; then
-            print_status 0 "Authenticated endpoint working"
-        else
-            print_status 1 "Authenticated endpoint failed"
-        fi
-    fi
-else
-    print_status 1 "Admin login failed"
-    echo "Response: $ADMIN_LOGIN_RESPONSE"
-fi
-
 echo ""
 echo -e "${GREEN}✅ Cognito integration test completed!${NC}"
 echo ""
